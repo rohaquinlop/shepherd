@@ -37,6 +37,7 @@ The fix runs in a new session, so it starts from the proven facts instead of the
 |---|---|
 | `skills/run` | The playbook. Claude follows it in your main session and writes the code there. |
 | `skills/diagnose` | Finds and proves a root cause, writes it to `docs/diagnoses/`. Never fixes. |
+| `skills/followup` | Parks a verified, out-of-scope side issue as a GitHub issue or Jira draft, after your yes. Never widens the current change. |
 | `hooks/diagnose-guard.sh` | While a diagnosis is active, blocks edits outside the write-up and scratch dir, and git commands that change state. |
 | `agents/reviewer` | A fresh reviewer with only `Read`, `Grep`, and `Glob`. It reads a review bundle and the target branch's rules, then returns findings or `current at <sha>`. |
 | `scripts/shepherd.sh` | State, decision log, review budget, review bundle, PR threads. |
