@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop hook. While shepherd is in an active phase, block the turn from ending
 # and say what is left, so the loop runs to a real stopping point without the
-# user nudging it. Waiting phases (CI, hosted review, the user, done) let the
+# user nudging it. Waiting phases (reviewer, CI, hosted review, the user, done) let the
 # turn end: a background command or the user wakes the session again.
 #
 # Blocks at most SHEPHERD_MAX_STOP_BLOCKS times in a row. Any `shepherd set`

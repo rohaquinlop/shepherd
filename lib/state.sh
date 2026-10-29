@@ -9,7 +9,7 @@
 #   state.json    machine state the hooks read: phase, PR, review budget, cleared tree
 
 SHEPHERD_ACTIVE_PHASES="study implement review push triage"
-SHEPHERD_WAIT_PHASES="waiting_ci waiting_review waiting_user done"
+SHEPHERD_WAIT_PHASES="waiting_reviewer waiting_ci waiting_review waiting_user done"
 SHEPHERD_MAX_STOP_BLOCKS=3
 
 shepherd_root() { git rev-parse --show-toplevel 2>/dev/null; }

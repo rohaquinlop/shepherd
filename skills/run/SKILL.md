@@ -9,9 +9,10 @@ argument-hint: "<GitHub issue/PR number or URL | Jira key or URL | pasted story 
 Invoking this skill is the user's go-ahead to branch, commit, open a PR, push, and reply to review
 comments for this one change. It is never a go-ahead to merge.
 
-The CLI is `../../scripts/shepherd.sh` relative to this skill's base directory. Call it `$SHEPHERD`
-below and always run it with `bash` from the repository root. "The state dir" means the path
-`$SHEPHERD dir` prints. Usage:
+The CLI is `../../scripts/shepherd.sh` relative to this skill's base directory. `$SHEPHERD` below
+means its absolute path: write that path out in every call (shell variables do not survive between
+commands, and a variable holding `bash <path>` breaks in zsh). Run it from the repository root.
+"The state dir" means the path `$SHEPHERD dir` prints. Usage:
 
 ```
 init [--issue N] [--pr N] [--jira KEY] [--url URL]
@@ -32,6 +33,7 @@ Work stops only at one of these points. Each one sets a phase that lets the turn
 
 | Stop | Phase |
 |---|---|
+| The reviewer agent is running in the background (its result wakes you) | `waiting_reviewer` |
 | CI is running (a background watch wakes you) | `waiting_ci` |
 | Waiting for a hosted reviewer (a background wait wakes you) | `waiting_review` |
 | A decision only the user can make (see *Interrupts*) | `waiting_user` |
@@ -110,18 +112,25 @@ Run before every push, unless the delta is exempt (below).
 3. `$SHEPHERD review-start` → reserves the next review and prints `call N of M`. If it says the
    budget is spent, go to step 7.
 4. `$SHEPHERD bundle --verified "<checks you ran and results>" [--findings <file>]` → prints the
-   bundle path. On a follow-up review, pass the previous findings so the reviewer checks them.
+   bundle path and records it as `bundle_path`. On a follow-up review, pass the previous findings
+   so the reviewer checks them.
 5. Dispatch the `shepherd:reviewer` agent. The prompt contains only:
    `BUNDLE: <path>`, `POLICY_BASE: <path>`, `call N of M`. Never add hints on what to look for, your
    reasoning, or your notes: choosing the reviewer's concerns removes its independence.
    Model: the agent's default (light) on call 1; pass `model: "opus"` on later calls, or on any call
    once `hosted_rounds` is 2 or more.
+   If the agent runs in the background, `$SHEPHERD set phase=waiting_reviewer` and end the turn
+   without polling. When its result arrives, `$SHEPHERD set phase=review` and continue.
 6. Triage every finding:
    - **Valid** → fix, rerun the affected checks, commit.
    - **Invalid** → dismiss with concrete evidence via `$SHEPHERD decision`.
    - **DECISION** → interrupt (see *Interrupts*).
 7. Then:
-   - `current at <sha>` → `$SHEPHERD clear --reviewed`.
+   Check these in order and take the first that applies:
+   - `current at <sha>`, or every finding dismissed with evidence and nothing changed →
+     `$SHEPHERD clear --reviewed`.
+   - Every fix since the reviewed commit falls in one exempt class (below) → `$SHEPHERD clear
+     --exempt <class> --reason "<the check and its result>"`. Do not spend a review on it.
    - Fixes made and budget left → back to step 3 with `--findings`.
    - Budget spent → fix the last findings, rerun checks, `$SHEPHERD clear --remediated`.
 8. `$SHEPHERD policy-base remove`.
