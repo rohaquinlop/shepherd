@@ -13,18 +13,38 @@ study → brief → implement → targeted checks → **fresh read-only review (
 
 The design follows the PR workflow in [pydantic-ai](https://github.com/pydantic/pydantic-ai) (`.agents/skills/pushing-commits-to-the-repo`): one agent writes the code, a separate agent with no chat history reviews it against the target branch's rules, and both iterate locally before CI and humans see the change.
 
+## Diagnose first, fix in a fresh session
+
+When the cause of a bug or incident is not known yet, start with:
+
+```
+/shepherd:diagnose <symptom, error, log, or ticket>
+```
+
+symptom and evidence → environment check → hypotheses, each settled by the cheapest discriminating check → reproduction → `docs/diagnoses/<date>-<slug>.md`
+
+While a diagnosis is active, a hook blocks edits to anything in the repo except the write-up and a scratch dir for probes, and blocks git commands that commit, switch, reset, or push. The write-up ends with a prompt for the next step:
+
+```
+/shepherd:run docs/diagnoses/<date>-<slug>.md
+```
+
+The fix runs in a new session, so it starts from the proven facts instead of the diagnosis session's dead ends.
+
 ## What runs where
 
 | Part | Role |
 |---|---|
 | `skills/run` | The playbook. Claude follows it in your main session and writes the code there. |
+| `skills/diagnose` | Finds and proves a root cause, writes it to `docs/diagnoses/`. Never fixes. |
+| `hooks/diagnose-guard.sh` | While a diagnosis is active, blocks edits outside the write-up and scratch dir, and git commands that change state. |
 | `agents/reviewer` | A fresh reviewer with only `Read`, `Grep`, and `Glob`. It reads a review bundle and the target branch's rules, then returns findings or `current at <sha>`. |
 | `scripts/shepherd.sh` | State, decision log, review budget, review bundle, PR threads. |
 | `hooks/session-start.sh` | Loads the brief and state into a new or cleared session on that branch. |
 | `hooks/pre-push.sh` | Blocks `git push` unless HEAD's tree was cleared by the review gate. Blocks force pushes and `gh pr merge`. |
 | `hooks/stop.sh` | Blocks the turn from ending while the loop is in an active phase (at most 3 times in a row). |
 
-The hooks do nothing on branches without shepherd state.
+The hooks do nothing on branches without shepherd state, and the diagnose guard does nothing without an active diagnosis.
 
 ## Why it is cheap on tokens
 
@@ -131,7 +151,10 @@ Per branch, in `.claude/shepherd/<branch>/`, excluded from git through `.git/inf
 - `last-bundle.md`: the last review bundle, kept when the clean checkout is removed
 - `state.json`: phase, PR, review budget, cleared tree
 
+Per worktree, for an active diagnosis, in `.claude/shepherd/_diagnose/`: `active.json` (turns the guard on) and `scratch/<slug>/` for probes. The write-up itself is in `docs/diagnoses/`, which is not excluded from git: commit it only if you want it in the repo.
+
 ## Limits
 
+- The diagnose guard sees file edits and git commands, not shell redirects or `sed -i`. The skill forbids those, but the hook cannot block them.
 - The reviewer subagent starts in your working tree, so Claude Code may load that tree's `CLAUDE.md`. The reviewer is told to treat candidate instruction files as review material and to read rules from the clean target-branch checkout, but the harness does not enforce this.
 - Invoking `/shepherd:run` authorizes branching, commits, pushes, and PR replies for that change. Your global "never commit unless asked" rule does not stop it.
