@@ -80,7 +80,9 @@ cmd_decision() {
   {
     printf '\n## %s — %s\n\n' "$(shepherd_now)" "$title"
     printf -- '- **Decision:** %s\n- **Why:** %s\n' "$decision" "$why"
-    [[ -n "$source" ]] && printf -- '- **Source:** %s\n' "$source"
+    if [[ -n "$source" ]]; then
+      printf -- '- **Source:** %s\n' "$source"
+    fi
   } >>"$(shepherd_dir)/decisions.md"
 }
 
