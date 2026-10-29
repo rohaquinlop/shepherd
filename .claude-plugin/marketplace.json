@@ -1,0 +1,15 @@
+{
+  "name": "shepherd",
+  "description": "Self-hosted marketplace for the shepherd plugin",
+  "owner": {
+    "name": "Robin Quintero",
+    "email": "rohaquinlop301@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "shepherd",
+      "description": "Drive a change from issue to merge-ready PR: implement, review with a fresh read-only agent, push, watch CI, and triage comments without stopping for things that do not need you",
+      "source": "./"
+    }
+  ]
+}
