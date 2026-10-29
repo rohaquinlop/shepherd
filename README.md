@@ -3,7 +3,10 @@
 A Claude Code plugin that drives one change from an issue to a merge-ready PR, and stops only for decisions that need you.
 
 ```
-/shepherd:run 123
+/shepherd:run 123                                     # GitHub issue
+/shepherd:run TS-123                                  # Jira story
+/shepherd:run https://<site>.atlassian.net/browse/TS-123
+/shepherd:run <pasted story or problem statement>
 ```
 
 study → brief → implement → targeted checks → **fresh read-only review (max 3)** → push → CI → triage comments → merge-ready
@@ -34,6 +37,7 @@ The hooks do nothing on branches without shepherd state.
 ## When it interrupts you
 
 - A complex task: plan-only PR first, or implement now.
+- A Jira story it cannot fetch (no Jira MCP or CLI): it asks you to paste it.
 - A design or API trade-off with no settled answer.
 - A claim it cannot reproduce here (credentials, VPN, a cluster).
 - A disagreement with the reviewer after the review budget is spent.
@@ -90,13 +94,38 @@ Add your repo's check commands (`uv run pytest:*`, `make lint:*`, ...). The pre-
 }
 ```
 
-Without it, shepherd uses `origin/HEAD` as the target, the commands documented in the repo's `CLAUDE.md`/`AGENTS.md`, and 3 reviews.
+A Jira-based work repo:
+
+```json
+{
+  "target_branch": "develop",
+  "branch_pattern": "ts-{number}-{slug}",
+  "pr_title": "{KEY}: {summary}",
+  "verify": ["uv run ty check", "uv run pytest {tests}", "npx jscpd --min-lines 5 {changed_files}"]
+}
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `target_branch` | Branch PRs target and reviews read rules from | `origin/HEAD` |
+| `verify` | Targeted checks; `{tests}` and `{changed_files}` are filled per change | commands in the repo's `CLAUDE.md`/`AGENTS.md` |
+| `max_reviews` | Pre-push review budget per PR | `3` |
+| `hosted_reviewers` | Bot or user logins whose PR reviews shepherd waits for | none |
+| `branch_pattern` | New branch name; `{type}`, `{ref}`, `{KEY}`, `{number}`, `{slug}` | `{type}/{ref}-{slug}` |
+| `pr_title` | PR title; `{KEY}`, `{summary}` | the repo's convention |
+
+`{ref}` is the issue number or the lowercased Jira key, `{KEY}` the uppercased key, `{number}` the part after the last `-`, `{slug}` a short lowercase form of the summary.
+
+## Jira
+
+shepherd reads a story through a Jira or Atlassian MCP server when one is connected, else through an installed Jira CLI. Without either, it asks you to paste the story. It saves the story to `source.md` in the state dir, and the reviewer gets it in the review bundle. It never comments on or transitions Jira issues.
 
 ## State
 
 Per branch, in `.claude/shepherd/<branch>/`, excluded from git through `.git/info/exclude`:
 
 - `brief.md`: the task contract
+- `source.md`: the Jira story or pasted text, verbatim
 - `plan.md`: the implementation plan
 - `decisions.md`: append-only log of decisions, review dispatches, and exemptions
 - `state.json`: phase, PR, review budget, cleared tree
