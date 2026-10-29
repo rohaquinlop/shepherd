@@ -1,6 +1,6 @@
 {
   "name": "shepherd",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Drive a change from issue to merge-ready PR: implement, review with a fresh read-only agent, push, watch CI, and triage comments without stopping for things that do not need you",
   "author": {
     "name": "Robin Quintero",
