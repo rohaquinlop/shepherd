@@ -17,7 +17,7 @@ commands, and a variable holding `bash <path>` breaks in zsh). Run it from the r
 ```
 init [--issue N] [--pr N] [--jira KEY] [--url URL]
 dir | status | get KEY | set KEY=VALUE | set KEY:=JSON ...
-branch-name --summary TEXT [--ref REF] [--type fix|feat|docs|refactor]
+branch-name --summary TEXT [--ref REF] [--type fix|feat|docs|refactor] [--apply]
 decision --title TEXT --decision TEXT --why TEXT [--source URL]
 policy-base add|remove
 review-start
@@ -60,11 +60,14 @@ Before every phase change, run `$SHEPHERD set phase=<phase>`.
   - Pasted story or free text → that text is the source. If its title or header names a story key
     (for example `TS-123: Add retry`), treat it as that Jira story. A key-shaped token elsewhere in
     the text (`UTF-8`, `ISO-8601`) is not a story key.
-- Pick the branch:
-  - On the target branch, create one named by
-    `$SHEPHERD branch-name --summary "<short summary>" [--ref <issue number or Jira key>] --type <fix|feat|docs|refactor>`.
-    It follows `branch_pattern` in `.claude/shepherd.json` (for example `ts-{number}-{slug}`).
-  - On any other branch, stay on it.
+- Pick the branch with
+  `$SHEPHERD branch-name --apply --summary "<short summary>" [--ref <issue number or Jira key>] --type <fix|feat|docs|refactor>`.
+  It follows `branch_pattern` in `.claude/shepherd.json` (for example `issue-{number}-{slug}`) and
+  prints the branch you are on afterwards:
+  - On the target branch, it creates the new branch.
+  - On a fresh branch (no commits ahead of the target, no upstream), such as one a harness made
+    for a new worktree, it renames it.
+  - On any other branch, it keeps it.
 - Init with the source: `$SHEPHERD init --issue N`, `--pr N`, or `--jira KEY`, plus `--url <link>`
   when there is one. Free text needs no flag.
 - For Jira and pasted sources, write the story to `source.md` in the state dir: title, description,
