@@ -69,7 +69,7 @@ The loop runs without you only if routine commands do not prompt. Allow at least
 {
   "permissions": {
     "allow": [
-      "Bash(bash */scripts/shepherd.sh *)",
+      "Bash(*/scripts/shepherd.sh *)",
       "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)",
       "Bash(git commit:*)", "Bash(git push:*)", "Bash(git fetch:*)", "Bash(git switch:*)",
       "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh pr create:*)", "Bash(gh issue view:*)",
@@ -128,6 +128,7 @@ Per branch, in `.claude/shepherd/<branch>/`, excluded from git through `.git/inf
 - `source.md`: the Jira story or pasted text, verbatim
 - `plan.md`: the implementation plan
 - `decisions.md`: append-only log of decisions, review dispatches, and exemptions
+- `last-bundle.md`: the last review bundle, kept when the clean checkout is removed
 - `state.json`: phase, PR, review budget, cleared tree
 
 ## Limits
