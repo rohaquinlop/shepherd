@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SessionStart hook. When the current branch has shepherd state, load the task
-# contract and machine state into context, so a new or cleared session resumes
-# the loop instead of starting over. Silent on branches without state.
+# SessionStart hook. When a diagnosis is active, or the current branch has
+# shepherd state, load it into context, so a new or cleared session resumes
+# instead of starting over. Silent otherwise.
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
 
@@ -11,13 +11,17 @@ input=$(cat)
 cwd=$(jq -r '.cwd // empty' <<<"$input")
 [[ -n "$cwd" ]] && cd "$cwd" 2>/dev/null
 
-shepherd_is_active || exit 0
+context=""
 
-dir=$(shepherd_dir)
-phase=$(shepherd_get phase)
-[[ "$phase" == "done" ]] && exit 0
+if shepherd_diagnose_active; then
+  writeup=$(jq -r .writeup "$(shepherd_diagnose_file)")
+  context="A shepherd diagnosis is active in this worktree (write-up: ${writeup}). Edits outside the write-up and its scratch dir are blocked. Resume it with the shepherd:diagnose skill; read the write-up first.
+"
+fi
 
-context="shepherd is active on this branch (phase: ${phase}). Resume it with the shepherd:run skill before doing anything else on this branch. State dir: ${dir}
+if shepherd_is_active && [[ "$(shepherd_get phase)" != "done" ]]; then
+  dir=$(shepherd_dir)
+  context+="shepherd is active on this branch (phase: $(shepherd_get phase)). Resume it with the shepherd:run skill before doing anything else on this branch. State dir: ${dir}
 
 ## state.json
 $(cat "$dir/state.json")
@@ -26,6 +30,9 @@ $(cat "$dir/state.json")
 $(cat "$dir/brief.md" 2>/dev/null)
 
 Read ${dir}/decisions.md before you change direction on anything it records."
+fi
+
+[[ -n "$context" ]] || exit 0
 
 jq -n --arg ctx "$context" \
   '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
