@@ -16,6 +16,7 @@
 #   threads                            unresolved PR review threads as JSON
 #   reply COMMENT_ID FILE | resolve THREAD_ID
 #   wait-review [--timeout SECONDS]    block until a new PR review or comment lands
+#   diagnose start --slug SLUG | status | end   diagnosis write-up, scratch dir, edit guard
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
 
@@ -29,7 +30,7 @@ require_active() { shepherd_is_active || die "no state for this branch; run \`sh
 repo_slug() { gh repo view --json nameWithOwner -q .nameWithOwner; }
 
 cmd_init() {
-  local issue="" pr="" jira="" url="" kind="text" ref="" dir common max
+  local issue="" pr="" jira="" url="" kind="text" ref="" dir max
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --issue) issue="$2"; shift 2 ;;
@@ -42,10 +43,7 @@ cmd_init() {
   dir=$(shepherd_dir) || die "not inside a git repository"
   mkdir -p "$dir"
 
-  common=$(git rev-parse --path-format=absolute --git-common-dir)
-  mkdir -p "$common/info"
-  grep -qxF '.claude/shepherd/' "$common/info/exclude" 2>/dev/null \
-    || printf '%s\n' '.claude/shepherd/' >>"$common/info/exclude"
+  shepherd_exclude_state
 
   [[ -f "$dir/brief.md" ]] || cp "$PLUGIN_ROOT/templates/brief.md" "$dir/brief.md"
   [[ -f "$dir/decisions.md" ]] || cp "$PLUGIN_ROOT/templates/decisions.md" "$dir/decisions.md"
@@ -352,6 +350,64 @@ cmd_clear() {
   esac
 }
 
+# Outside a git repository there is no code to protect, so there is no guard:
+# the write-up and scratch dir go under ~/.claude/diagnoses/.
+diagnose_outside_repo() {
+  local sub="$1" slug base writeup
+  case "$sub" in
+    start)
+      [[ "$2" == "--slug" && -n "$3" ]] || die "diagnose start --slug SLUG"
+      slug=$(slugify "$3")
+      base="$HOME/.claude/diagnoses"
+      mkdir -p "$base/scratch/$slug"
+      writeup=$(find "$base" -maxdepth 1 -name "*-$slug.md" | head -1)
+      writeup=${writeup:-"$base/$(date +%Y-%m-%d)-$slug.md"}
+      [[ -f "$writeup" ]] || cp "$PLUGIN_ROOT/templates/diagnosis.md" "$writeup"
+      printf 'writeup: %s\nscratch: %s\nguard: off (not in a git repository)\n' "$writeup" "$base/scratch/$slug"
+      ;;
+    status|end) echo "no active diagnosis (not in a git repository)" ;;
+    *) die "diagnose start --slug SLUG | status | end" ;;
+  esac
+}
+
+cmd_diagnose() {
+  local sub="$1" slug="" root dir file writeup scratch existing
+  root=$(shepherd_root)
+  [[ -n "$root" ]] || { diagnose_outside_repo "$@"; return; }
+  shift
+  dir="$root/.claude/shepherd/_diagnose"
+  file=$(shepherd_diagnose_file)
+  case "$sub" in
+    start)
+      [[ "$1" == "--slug" && -n "$2" ]] || die "diagnose start --slug SLUG"
+      slug=$(slugify "$2")
+      if shepherd_diagnose_active && [[ "$(jq -r .slug "$file")" != "$slug" ]]; then
+        die "diagnosis '$(jq -r .slug "$file")' is still active; end it first"
+      fi
+      shepherd_exclude_state
+      scratch="$dir/scratch/$slug"
+      mkdir -p "$scratch" "$root/docs/diagnoses"
+      existing=$(find "$root/docs/diagnoses" -maxdepth 1 -name "*-$slug.md" | head -1)
+      writeup=${existing:-"$root/docs/diagnoses/$(date +%Y-%m-%d)-$slug.md"}
+      [[ -f "$writeup" ]] || cp "$PLUGIN_ROOT/templates/diagnosis.md" "$writeup"
+      jq -n --arg slug "$slug" --arg writeup "$writeup" --arg scratch "$scratch" --arg now "$(shepherd_now)" \
+        '{slug: $slug, writeup: $writeup, scratch: $scratch, started: $now}' >"$file"
+      printf 'writeup: %s\nscratch: %s\n' "$writeup" "$scratch"
+      ;;
+    status)
+      shepherd_diagnose_active || { echo "no active diagnosis"; return 0; }
+      cat "$file"
+      ;;
+    end)
+      shepherd_diagnose_active || die "no active diagnosis"
+      writeup=$(jq -r .writeup "$file")
+      rm -f "$file"
+      echo "ended; write-up: $writeup"
+      ;;
+    *) die "diagnose start --slug SLUG | status | end" ;;
+  esac
+}
+
 cmd_threads() {
   local pr slug
   pr=$(shepherd_get pr)
@@ -418,5 +474,6 @@ case "$sub" in
   reply) require_active; cmd_reply "$@" ;;
   resolve) cmd_resolve "$@" ;;
   wait-review) cmd_wait_review "$@" ;;
-  *) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  diagnose) cmd_diagnose "$@" ;;
+  *) sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

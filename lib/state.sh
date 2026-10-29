@@ -7,6 +7,10 @@
 #   brief.md      task contract: scope, success criteria, constraints
 #   decisions.md  append-only log of non-obvious decisions and review records
 #   state.json    machine state the hooks read: phase, PR, review budget, cleared tree
+#
+# A diagnosis is per worktree, not per branch, under .claude/shepherd/_diagnose/:
+#   active.json   slug, write-up path, scratch dir; its presence turns on the edit guard
+#   scratch/<slug>/  the only place repro scripts and probes may be written
 
 SHEPHERD_ACTIVE_PHASES="study implement review push triage"
 SHEPHERD_WAIT_PHASES="waiting_reviewer waiting_ci waiting_review waiting_user done"
@@ -33,6 +37,27 @@ shepherd_state_file() {
 shepherd_is_active() {
   local file
   file=$(shepherd_state_file) || return 1
+  [[ -f "$file" ]]
+}
+
+shepherd_exclude_state() {
+  local common
+  common=$(git rev-parse --path-format=absolute --git-common-dir) || return 1
+  mkdir -p "$common/info"
+  grep -qxF '.claude/shepherd/' "$common/info/exclude" 2>/dev/null \
+    || printf '%s\n' '.claude/shepherd/' >>"$common/info/exclude"
+}
+
+shepherd_diagnose_file() {
+  local root
+  root=$(shepherd_root) || return 1
+  [[ -n "$root" ]] || return 1
+  printf '%s/.claude/shepherd/_diagnose/active.json' "$root"
+}
+
+shepherd_diagnose_active() {
+  local file
+  file=$(shepherd_diagnose_file) || return 1
   [[ -f "$file" ]]
 }
 
