@@ -4,7 +4,8 @@
 #
 #   init [--issue N] [--pr N] [--jira KEY] [--url URL]   create branch state, exclude it from git
 #   dir                                print this branch's state dir
-#   branch-name --summary TEXT [--ref REF] [--type TYPE] render the configured branch pattern
+#   branch-name --summary TEXT [--ref REF] [--type TYPE] [--apply]   render the branch pattern;
+#                                      --apply switches to it when the branch is fresh
 #   status                             print state.json
 #   get KEY | set KEY=VAL|KEY:=JSON... read or write state
 #   decision --title T --decision D --why W [--source S]
@@ -91,12 +92,13 @@ slugify() {
 }
 
 cmd_branch_name() {
-  local ref="" summary="" type="feat" pattern name number
+  local ref="" summary="" type="feat" apply="" pattern name number
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --ref) ref="$2"; shift 2 ;;
       --summary) summary="$2"; shift 2 ;;
       --type) type="$2"; shift 2 ;;
+      --apply) apply=1; shift ;;
       *) die "branch-name: unknown argument $1" ;;
     esac
   done
@@ -117,7 +119,33 @@ cmd_branch_name() {
   name=${name//\{number\}/$number}
   name=${name//\{slug\}/$(slugify "$summary")}
   git check-ref-format --branch "$name" >/dev/null 2>&1 || die "'$name' is not a valid branch name"
-  printf '%s\n' "$name"
+  if [[ -n "$apply" ]]; then
+    apply_branch_name "$name"
+  else
+    printf '%s\n' "$name"
+  fi
+}
+
+# Switch to the rendered name: branch off the target branch, or rename a
+# branch nobody has worked on yet (no commits ahead of the target, no upstream,
+# no shepherd state), such as one a harness created for a fresh worktree.
+# Any other branch is kept. Prints the branch that is checked out afterwards.
+apply_branch_name() {
+  local name="$1" current target base
+  current=$(shepherd_branch)
+  target=$(shepherd_target_branch)
+  base="origin/$target"
+  git rev-parse --verify --quiet "$base" >/dev/null || base="$target"
+  if [[ "$current" == "$name" ]]; then
+    :
+  elif [[ "$current" == "$target" ]]; then
+    git switch --quiet -c "$name" || die "could not create branch $name"
+  elif ! shepherd_is_active \
+    && ! git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1 \
+    && [[ "$(git rev-list --count "$base..HEAD" 2>/dev/null)" == "0" ]]; then
+    git branch -m "$name" || die "could not rename $current to $name"
+  fi
+  shepherd_branch
 }
 
 cmd_decision() {
@@ -390,5 +418,5 @@ case "$sub" in
   reply) require_active; cmd_reply "$@" ;;
   resolve) cmd_resolve "$@" ;;
   wait-review) cmd_wait_review "$@" ;;
-  *) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
