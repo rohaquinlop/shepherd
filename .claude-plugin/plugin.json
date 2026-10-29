@@ -8,5 +8,6 @@
     "url": "https://github.com/rohaquinlop"
   },
   "homepage": "https://github.com/rohaquinlop/shepherd",
-  "repository": "https://github.com/rohaquinlop/shepherd"
+  "repository": "https://github.com/rohaquinlop/shepherd",
+  "license": "MIT"
 }
