@@ -1,7 +1,7 @@
 ---
 name: run
 description: Drive one change from a GitHub issue, a Jira story, a PR, or a pasted problem statement to a merge-ready PR without stopping for anything that does not need the user. Implements in the main session, reviews each push with a fresh read-only reviewer (at most 3 reviews), pushes, watches CI, and triages every comment. Use when the user runs /shepherd:run, or when a SessionStart note says shepherd is active on the branch.
-argument-hint: "<GitHub issue/PR number or URL | Jira key or URL | pasted story or problem statement>"
+argument-hint: "<GitHub issue/PR number or URL | Jira key or URL | docs/diagnoses/ write-up | pasted story or problem statement>"
 ---
 
 # shepherd: issue to merge-ready PR
@@ -47,9 +47,15 @@ Before every phase change, run `$SHEPHERD set phase=<phase>`.
 
 ## 0. Start or resume
 
+- If `$SHEPHERD diagnose status` shows an active diagnosis, stop: its guard blocks every edit. Tell
+  the user to finish it with `shepherd:diagnose` (which ends it) or to run `$SHEPHERD diagnose end`.
 - If `$SHEPHERD status` succeeds, this branch already has state: read `brief.md` and
   `decisions.md` in the state dir, then continue from the recorded phase. Do not redo finished stages.
 - Otherwise parse the argument:
+  - Diagnosis write-up (a path under `docs/diagnoses/`) → read it. Its symptom, root cause,
+    reproduction, fix direction, and acceptance criteria are the starting brief. If its status is
+    not `root cause confirmed`, the study stage must confirm the cause first. Copy it to
+    `source.md`, and use the ticket it names, if any, as `--issue` or `--jira`.
   - GitHub issue (a number, `#N`, or a github.com issue URL) →
     `gh issue view <N> --json title,body,comments,labels,state`
   - GitHub PR → `gh pr view <N> --json title,body,headRefName,comments,reviews`, check out its
