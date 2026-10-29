@@ -158,6 +158,10 @@ cmd_policy_base() {
     remove)
       dir=$(shepherd_get policy_base_dir)
       if [[ -n "$dir" ]]; then
+        if [[ -f "$(dirname "$dir")/bundle.md" ]]; then
+          cp "$(dirname "$dir")/bundle.md" "$(shepherd_dir)/last-bundle.md"
+          shepherd_set "bundle_path=$(shepherd_dir)/last-bundle.md"
+        fi
         git worktree remove --force "$dir"
         rm -rf "$(dirname "$dir")"
       fi
@@ -257,6 +261,7 @@ cmd_bundle() {
     git diff --no-ext-diff --no-textconv "$merge_base" "$head"
     echo '```'
   } >"$out"
+  shepherd_set "bundle_path=$out"
   echo "$out"
 }
 
@@ -278,7 +283,7 @@ cmd_review_start() {
 
 cmd_clear() {
   require_active
-  local mode="" class="" reason="" tree candidate reviewed_tree
+  local mode="" class="" reason="" tree candidate
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --reviewed|--remediated) mode="${1#--}"; shift ;;
@@ -309,11 +314,11 @@ cmd_clear() {
     exempt)
       shepherd_in_list "$class" "$EXEMPT_CLASSES" || die "exempt class must be one of: $EXEMPT_CLASSES"
       [[ -n "$reason" ]] || die "--exempt needs --reason with the check you ran"
-      reviewed_tree=$(shepherd_get reviewed_tree)
-      [[ -n "$reviewed_tree" ]] || die "nothing reviewed yet; an exemption chains from a reviewed tree"
+      candidate=$(shepherd_get review_candidate)
+      [[ -n "$candidate" ]] || die "nothing reviewed yet; an exemption chains from a reviewed commit"
       shepherd_set "cleared_tree=$tree" "phase=push"
       cmd_decision --title "exempt delta ($class) at $(git rev-parse HEAD)" \
-        --decision "pushed without re-review" --why "$reason; chains from reviewed $(shepherd_get reviewed_head)"
+        --decision "pushed without re-review" --why "$reason; chains from reviewed $candidate"
       ;;
     *) die "clear --reviewed | --remediated | --exempt CLASS --reason WHY" ;;
   esac
