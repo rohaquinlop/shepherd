@@ -111,7 +111,7 @@ A Jira-based work repo:
 | `verify` | Targeted checks; `{tests}` and `{changed_files}` are filled per change | commands in the repo's `CLAUDE.md`/`AGENTS.md` |
 | `max_reviews` | Pre-push review budget per PR | `3` |
 | `hosted_reviewers` | Bot or user logins whose PR reviews shepherd waits for | none |
-| `branch_pattern` | New branch name; `{type}`, `{ref}`, `{KEY}`, `{number}`, `{slug}` | `{type}/{ref}-{slug}` |
+| `branch_pattern` | Branch name; `{type}`, `{ref}`, `{KEY}`, `{number}`, `{slug}`. Also renames a fresh branch a harness created for a new worktree (no commits, no upstream) | `{type}/{ref}-{slug}` |
 | `pr_title` | PR title; `{KEY}`, `{summary}` | the repo's convention |
 
 `{ref}` is the issue number or the lowercased Jira key, `{KEY}` the uppercased key, `{number}` the part after the last `-`, `{slug}` a short lowercase form of the summary.
