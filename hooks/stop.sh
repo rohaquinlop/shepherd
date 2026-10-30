@@ -25,7 +25,7 @@ blocks=$(shepherd_get stop_blocks)
 shepherd_state_apply '.stop_blocks = ((.stop_blocks // 0) + 1)'
 
 case "$phase" in
-  study) next="finish the brief and the plan, then implement (or ask the one simple/complex question if the task is complex)" ;;
+  study) next="finish the brief and the plan, then implement (or, if the task is complex, run the plan design review and ask the user to approve or revise the plan)" ;;
   implement) next="finish the change, run the targeted checks, commit, then run the review gate" ;;
   review) next="triage the reviewer's findings, fix and commit, then re-review within budget or clear the tree" ;;
   push) next="push the cleared commit, then start the CI watch in the background and set phase=waiting_ci" ;;
