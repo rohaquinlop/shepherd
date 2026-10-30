@@ -57,7 +57,7 @@ The hooks do nothing on branches without shepherd state, and the diagnose guard 
 
 ## When it interrupts you
 
-- A complex task: plan-only PR first, or implement now.
+- A complex task: after a design review of the plan, approve the plan and implement, or revise it. The plan stays out of git.
 - A Jira story it cannot fetch (no Jira MCP or CLI): it asks you to paste it.
 - A design or API trade-off with no settled answer.
 - A claim it cannot reproduce here (credentials, VPN, a cluster).
@@ -131,6 +131,7 @@ A Jira-based work repo:
 | `target_branch` | Branch PRs target and reviews read rules from | `origin/HEAD` |
 | `verify` | Targeted checks; `{tests}` and `{changed_files}` are filled per change | commands in the repo's `CLAUDE.md`/`AGENTS.md` |
 | `max_reviews` | Pre-push review budget per PR | `3` |
+| `max_plan_reviews` | Plan design reviews for a complex task, separate from `max_reviews` | `2` |
 | `hosted_reviewers` | Bot or user logins whose PR reviews shepherd waits for | none |
 | `branch_pattern` | Branch name; `{type}`, `{ref}`, `{KEY}`, `{number}`, `{slug}`. Also renames a fresh branch a harness created for a new worktree (no commits, no upstream) | `{type}/{ref}-{slug}` |
 | `pr_title` | PR title; `{KEY}`, `{summary}` | the repo's convention |
@@ -147,7 +148,7 @@ Per branch, in `.claude/shepherd/<branch>/`, excluded from git through `.git/inf
 
 - `brief.md`: the task contract
 - `source.md`: the Jira story or pasted text, verbatim
-- `plan.md`: the implementation plan
+- `plan.md`: the implementation plan, never committed
 - `decisions.md`: append-only log of decisions, review dispatches, and exemptions
 - `last-bundle.md`: the last review bundle, kept when the clean checkout is removed
 - `state.json`: phase, PR, review budget, cleared tree
