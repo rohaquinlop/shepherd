@@ -50,8 +50,8 @@ The hooks do nothing on branches without shepherd state, and the diagnose guard 
 ## Why it is cheap on tokens
 
 - No orchestrator relays work: the main session implements.
-- The reviewer gets a bundle (brief, diff, PR discussion), not the conversation.
-- At most 3 reviews per PR. The first runs on Haiku.
+- The reviewer gets a bundle (brief, diff or plan, PR discussion), not the conversation.
+- At most 3 pre-push reviews per PR, and at most 2 plan design reviews for a complex task. The first runs on Haiku.
 - Small deltas such as formatter output, test-only fixes, and clean merges skip re-review.
 - CI and hosted review are waited on by background commands, not by polling turns.
 
