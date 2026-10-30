@@ -10,8 +10,10 @@
 #   get KEY | set KEY=VAL|KEY:=JSON... read or write state
 #   decision --title T --decision D --why W [--source S]
 #   policy-base add|remove             clean checkout of the target branch tip
-#   bundle [--findings FILE] [--verified TEXT]   write the review bundle, print its path
-#   review-start                       reserve the next review in the budget
+#   bundle [--plan] [--findings FILE] [--verified TEXT]   write the review bundle, print its path;
+#                                      --plan bundles plan.md for a design review instead of the diff
+#   review-start [--plan]              reserve the next review in the budget; --plan uses the
+#                                      separate plan-review budget
 #   clear --reviewed | --remediated | --exempt CLASS --reason WHY
 #   threads                            unresolved PR review threads as JSON
 #   reply COMMENT_ID FILE | resolve THREAD_ID
@@ -30,7 +32,7 @@ require_active() { shepherd_is_active || die "no state for this branch; run \`sh
 repo_slug() { gh repo view --json nameWithOwner -q .nameWithOwner; }
 
 cmd_init() {
-  local issue="" pr="" jira="" url="" kind="text" ref="" dir max
+  local issue="" pr="" jira="" url="" kind="text" ref="" dir max max_plan
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --issue) issue="$2"; shift 2 ;;
@@ -58,12 +60,13 @@ cmd_init() {
 
   if [[ ! -f "$dir/state.json" ]]; then
     max=$(shepherd_config max_reviews)
+    max_plan=$(shepherd_config max_plan_reviews)
     jq -n \
       --arg branch "$(shepherd_branch)" \
       --arg target "$(shepherd_target_branch)" \
       --arg issue "$issue" --arg pr "$pr" \
       --arg kind "$kind" --arg ref "$ref" --arg url "$url" \
-      --argjson max "${max:-3}" \
+      --argjson max "${max:-3}" --argjson max_plan "${max_plan:-2}" \
       --arg now "$(shepherd_now)" \
       '{branch: $branch, target_branch: $target, phase: "study",
         source_kind: $kind,
@@ -71,7 +74,7 @@ cmd_init() {
         source_url: (if $url == "" then null else $url end),
         issue: (if $issue == "" then null else ($issue | tonumber) end),
         pr: (if $pr == "" then null else ($pr | tonumber) end),
-        reviews: 0, max_reviews: $max, hosted_rounds: 0,
+        reviews: 0, max_reviews: $max, plan_reviews: 0, max_plan_reviews: $max_plan, hosted_rounds: 0,
         review_candidate: null, previous_candidate: null, reviewed_head: null, reviewed_tree: null, cleared_tree: null,
         policy_base_dir: null, policy_base_sha: null,
         stop_blocks: 0, created_at: $now, updated_at: $now}' >"$dir/state.json"
@@ -199,9 +202,10 @@ cmd_policy_base() {
 
 cmd_bundle() {
   require_active
-  local findings="" verified="" base_sha head merge_base reviewed issue pr out slug
+  local findings="" verified="" plan="" base_sha head merge_base reviewed issue pr out slug
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --plan) plan="$(shepherd_dir)/plan.md"; shift ;;
       --findings) findings="$2"; shift 2 ;;
       --verified) verified="$2"; shift 2 ;;
       *) die "bundle: unknown argument $1" ;;
@@ -209,6 +213,7 @@ cmd_bundle() {
   done
   base_sha=$(shepherd_get policy_base_sha)
   [[ -n "$(shepherd_get policy_base_dir)" ]] || die "run \`shepherd policy-base add\` first"
+  [[ -z "$plan" || -s "$plan" ]] || die "write plan.md in the state dir first"
   head=$(git rev-parse HEAD)
   merge_base=$(git merge-base "$base_sha" "$head")
   reviewed=$(shepherd_get previous_candidate)
@@ -219,6 +224,9 @@ cmd_bundle() {
   {
     echo "# Review bundle"
     echo
+    if [[ -n "$plan" ]]; then
+      echo "- review-kind: plan (an implementation plan, reviewed before any code is written; it is never committed)"
+    fi
     echo "- policy-base-sha: $base_sha"
     echo "- policy-base-dir: $(shepherd_get policy_base_dir)"
     echo "- merge-base-sha: $merge_base"
@@ -269,7 +277,12 @@ cmd_bundle() {
       echo
       cat "$findings"
     fi
-    if [[ -n "$reviewed" ]] && git merge-base --is-ancestor "$reviewed" "$head" 2>/dev/null; then
+    if [[ -n "$plan" ]]; then
+      echo
+      echo "## Plan to review"
+      echo
+      cat "$plan"
+    elif [[ -n "$reviewed" ]] && git merge-base --is-ancestor "$reviewed" "$head" 2>/dev/null; then
       echo
       echo "## Diff to review: $reviewed..$head"
       echo
@@ -282,17 +295,34 @@ cmd_bundle() {
       echo
       echo "## Diff to review: $merge_base..$head"
     fi
-    echo
-    echo '```diff'
-    git diff --no-ext-diff --no-textconv "$merge_base" "$head"
-    echo '```'
+    if [[ -z "$plan" ]]; then
+      echo
+      echo '```diff'
+      git diff --no-ext-diff --no-textconv "$merge_base" "$head"
+      echo '```'
+    fi
   } >"$out"
   shepherd_set "bundle_path=$out"
   echo "$out"
 }
 
+cmd_review_start_plan() {
+  local n max
+  [[ -s "$(shepherd_dir)/plan.md" ]] || die "write plan.md in the state dir first"
+  n=$(shepherd_get plan_reviews)
+  max=$(shepherd_get max_plan_reviews)
+  n=${n:-0} max=${max:-2}
+  (( n < max )) || die "plan review budget spent ($n of $max). Ask the user to approve or revise the plan."
+  n=$((n + 1))
+  shepherd_set "plan_reviews:=$n"
+  cmd_decision --title "plan review $n of $max reserved" --decision "dispatched" \
+    --why "plan.md sha $(git hash-object "$(shepherd_dir)/plan.md")"
+  echo "plan call $n of $max"
+}
+
 cmd_review_start() {
   require_active
+  [[ "$1" == "--plan" ]] && { cmd_review_start_plan; return; }
   local n max head
   n=$(shepherd_get reviews)
   max=$(shepherd_get max_reviews)
@@ -468,12 +498,12 @@ case "$sub" in
   decision) cmd_decision "$@" ;;
   policy-base) cmd_policy_base "$@" ;;
   bundle) cmd_bundle "$@" ;;
-  review-start) cmd_review_start ;;
+  review-start) cmd_review_start "$@" ;;
   clear) cmd_clear "$@" ;;
   threads) require_active; cmd_threads ;;
   reply) require_active; cmd_reply "$@" ;;
   resolve) cmd_resolve "$@" ;;
   wait-review) cmd_wait_review "$@" ;;
   diagnose) cmd_diagnose "$@" ;;
-  *) sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
