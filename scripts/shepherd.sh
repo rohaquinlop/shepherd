@@ -232,7 +232,7 @@ cmd_bundle() {
     echo "- merge-base-sha: $merge_base"
     echo "- candidate-head-sha: $head"
     echo "- candidate-tree: $(git rev-parse 'HEAD^{tree}')"
-    [[ -n "$reviewed" ]] && echo "- last-reviewed-sha: $reviewed"
+    [[ -n "$reviewed" && -z "$plan" ]] && echo "- last-reviewed-sha: $reviewed"
     echo
     echo "## Task contract"
     echo
@@ -309,6 +309,7 @@ cmd_bundle() {
 cmd_review_start_plan() {
   local n max
   [[ -s "$(shepherd_dir)/plan.md" ]] || die "write plan.md in the state dir first"
+  [[ -n "$(shepherd_get policy_base_dir)" ]] || die "run \`shepherd policy-base add\` first"
   n=$(shepherd_get plan_reviews)
   max=$(shepherd_get max_plan_reviews)
   n=${n:-0} max=${max:-2}
@@ -505,5 +506,5 @@ case "$sub" in
   resolve) cmd_resolve "$@" ;;
   wait-review) cmd_wait_review "$@" ;;
   diagnose) cmd_diagnose "$@" ;;
-  *) sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
