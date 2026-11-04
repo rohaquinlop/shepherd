@@ -440,6 +440,10 @@ cmd_clear() {
       [[ -n "$reason" ]] || die "--exempt needs --reason with the check you ran"
       candidate=$(shepherd_get review_candidate)
       [[ -n "$candidate" ]] || die "nothing reviewed yet; an exemption chains from a reviewed commit"
+      if (( $(shepherd_get reviews) >= $(shepherd_get max_reviews) )) \
+        && [[ "$(git rev-parse "$candidate^{tree}")" != "$(shepherd_get reviewed_tree)" ]]; then
+        die "the budget is spent and the last call's findings are not cleared; run \`shepherd review-start --verify\`"
+      fi
       shepherd_set "cleared_tree=$tree" "phase=push"
       cmd_decision --title "exempt delta ($class) at $(git rev-parse HEAD)" \
         --decision "pushed without re-review" --why "$reason; chains from reviewed $candidate"

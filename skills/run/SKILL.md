@@ -147,9 +147,9 @@ Run before every push, unless the delta is exempt (below).
 5. Dispatch the `shepherd:reviewer` agent. The prompt contains only:
    `BUNDLE: <path>`, `POLICY_BASE: <path>`, `call N of M`. Never add hints on what to look for, your
    reasoning, or your notes: choosing the reviewer's concerns removes its independence.
-   Model: in round 1 before a PR exists, the agent's default (light) on call 1; pass
-   `model: "opus"` on later calls, or on any call once `hosted_rounds` is 2 or more. Once `pr` is
-   set, in round 2 or later, and on every verify call, use the agent's default and never pass
+   Model: before a PR exists, in round 1, use the agent's default (light) on call 1 and pass
+   `model: "opus"` on later calls. In every other case (any call once `pr` is set, any call in
+   round 2 or later, and every verify call) use the agent's default and never pass
    `model: "opus"`. For a verify call, the prompt line is `verify call for round R` instead of
    `call N of M`.
    If the agent runs in the background, `$SHEPHERD set phase=waiting_reviewer` and end the turn
@@ -171,7 +171,7 @@ Run before every push, unless the delta is exempt (below).
      then steps 4–6 with `--findings`. `current at <sha>` → `$SHEPHERD clear --reviewed`. Findings
      left → interrupt: start a new round (`$SHEPHERD review-round --user --reason "<the user's
      answer>"`), or accept the tree as is (`$SHEPHERD clear --remediated --reason "<the user's
-     answer>"`).
+     answer>"`). If the user wants the verify call's findings fixed, that fix needs a new round.
 8. `$SHEPHERD policy-base remove`.
 
 When the user asks to re-run reviews, record their words with `$SHEPHERD decision`, run
