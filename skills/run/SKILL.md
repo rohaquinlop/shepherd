@@ -1,6 +1,6 @@
 ---
 name: run
-description: Drive one change from a GitHub issue, a Jira story, a PR, or a pasted problem statement to a merge-ready PR without stopping for anything that does not need the user. Implements in the main session, reviews each push with a fresh read-only reviewer (at most 3 reviews), pushes, watches CI, and triages every comment. Use when the user runs /shepherd:run, or when a SessionStart note says shepherd is active on the branch.
+description: Drive one change from a GitHub issue, a Jira story, a PR, or a pasted problem statement to a merge-ready PR without stopping for anything that does not need the user. Implements in the main session, reviews each push with a fresh read-only reviewer (at most 3 reviews per round, plus one verify call), pushes, watches CI, and triages every comment. Use when the user runs /shepherd:run, or when a SessionStart note says shepherd is active on the branch.
 argument-hint: "<GitHub issue/PR number or URL | Jira key or URL | docs/diagnoses/ write-up | pasted story or problem statement>"
 ---
 
@@ -20,9 +20,10 @@ dir | status | get KEY | set KEY=VALUE | set KEY:=JSON ...
 branch-name --summary TEXT [--ref REF] [--type fix|feat|docs|refactor] [--apply]
 decision --title TEXT --decision TEXT --why TEXT [--source URL]
 policy-base add|remove
-review-start [--plan]
+review-start [--plan|--verify]
+review-round --reason TEXT [--user]
 bundle [--plan] [--verified TEXT] [--findings FILE]
-clear --reviewed | --remediated | --exempt CLASS --reason TEXT
+clear --reviewed | --remediated --reason TEXT | --exempt CLASS --reason TEXT
 threads | reply COMMENT_ID FILE | resolve THREAD_ID
 wait-review [--timeout SECONDS]
 ```
@@ -146,8 +147,11 @@ Run before every push, unless the delta is exempt (below).
 5. Dispatch the `shepherd:reviewer` agent. The prompt contains only:
    `BUNDLE: <path>`, `POLICY_BASE: <path>`, `call N of M`. Never add hints on what to look for, your
    reasoning, or your notes: choosing the reviewer's concerns removes its independence.
-   Model: the agent's default (light) on call 1; pass `model: "opus"` on later calls, or on any call
-   once `hosted_rounds` is 2 or more.
+   Model: before a PR exists, in round 1, use the agent's default (light) on call 1 and pass
+   `model: "opus"` on later calls. In every other case (any call once `pr` is set, any call in
+   round 2 or later, and every verify call) use the agent's default and never pass
+   `model: "opus"`. For a verify call, the prompt line is `verify call for round R` instead of
+   `call N of M`.
    If the agent runs in the background, `$SHEPHERD set phase=waiting_reviewer` and end the turn
    without polling. When its result arrives, `$SHEPHERD set phase=review` and continue.
 6. Triage every finding:
@@ -159,10 +163,19 @@ Run before every push, unless the delta is exempt (below).
    - `current at <sha>`, or every finding dismissed with evidence and nothing changed →
      `$SHEPHERD clear --reviewed`.
    - Every fix since the reviewed commit falls in one exempt class (below) → `$SHEPHERD clear
-     --exempt <class> --reason "<the check and its result>"`. Do not spend a review on it.
+     --exempt <class> --reason "<the check and its result>"`. Do not spend a review on it. This
+     does not apply once the budget is spent: fixes to the last call's findings go to the verify
+     call.
    - Fixes made and budget left → back to step 3 with `--findings`.
-   - Budget spent → fix the last findings, rerun checks, `$SHEPHERD clear --remediated`.
+   - Budget spent → fix the last findings, rerun checks, commit, `$SHEPHERD review-start --verify`,
+     then steps 4–6 with `--findings`. `current at <sha>` → `$SHEPHERD clear --reviewed`. Findings
+     left → interrupt: start a new round (`$SHEPHERD review-round --user --reason "<the user's
+     answer>"`), or accept the tree as is (`$SHEPHERD clear --remediated --reason "<the user's
+     answer>"`). If the user wants the verify call's findings fixed, that fix needs a new round.
 8. `$SHEPHERD policy-base remove`.
+
+When the user asks to re-run reviews, record their words with `$SHEPHERD decision`, run
+`$SHEPHERD review-round --user --reason "<their words>"`, then run the review gate.
 
 The PreToolUse hook blocks `git push` unless HEAD's tree is the cleared tree, so a change after the
 review needs a new review or an exemption.
@@ -199,9 +212,11 @@ resolution, and any public API change are never exempt.
 ## 5. CI
 
 - Green → stage 6.
-- Red → read the failing job's log. If the failure is yours, fix it (stage 2), then the review gate
-  or an exemption, then push again. If it is a known flake or already fails on the target branch,
-  prove it (same failure on the target branch, or a rerun passes), record it, and continue.
+- Red → read the failing job's log. If the failure is yours, fix it (stage 2), run
+  `$SHEPHERD review-round --reason "CI round on PR #<N>"` (if it refuses, stay in the current
+  round), then the review gate or an exemption, then push again. If it is a known flake or already
+  fails on the target branch, prove it (same failure on the target branch, or a rerun passes),
+  record it, and continue.
 
 ## 6. Triage comments
 
@@ -210,7 +225,8 @@ Run `$SHEPHERD set phase=triage`, then read every top-level comment, review body
 and maintainer decisions are the criteria. A bot's severity label has no authority. Read a whole
 thread before you decide; a maintainer reply settles it.
 
-- **Valid** → fix, verify, commit, review gate or exemption, push, back to stage 4 step 3. Then reply
+- **Valid** → fix, verify, commit, `$SHEPHERD review-round --reason "comment round on PR #<N>"` (if
+  it refuses, stay in the current round), review gate or exemption, push, back to stage 4 step 3. Then reply
   with what changed (`$SHEPHERD reply <comment-id> <file>`), and `$SHEPHERD resolve <thread-id>`.
 - **Invalid** → reproduce the claim first. Reply with the evidence and resolve.
 - **Cannot test** (needs credentials, VPN, a cluster) → this is not a refutation. Interrupt.
@@ -250,7 +266,7 @@ available, send one too.
 - A design choice, API trade-off, or behavioral default with no settled answer.
 - A claim you cannot reproduce in this environment.
 - Missing access: credentials, VPN, a required secret. Give the exact command the user must run.
-- The reviewer and you still disagree after the budget is spent, on something that is not minor.
+- The verify call still has findings on the last round's fixes.
 
 When the user answers, record the answer with `$SHEPHERD decision` and continue from the phase you
 were in.
@@ -260,6 +276,7 @@ were in.
 - Merge, force-push, or rewrite pushed history.
 - Implement in a subagent, or give the reviewer anything beyond the bundle, the policy base, and the
   call count.
-- Run a fourth review. Treat the review gate as test execution.
+- Run more than `max_reviews` calls plus one verify call in a round, or run
+  `review-round --user` without the user's request. Treat the review gate as test execution.
 - Leave the session with uncommitted changes in an active phase.
 - Commit `.claude/shepherd/`, `.env` files, or secrets.
