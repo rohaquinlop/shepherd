@@ -52,7 +52,7 @@ The hooks do nothing on branches without shepherd state, and the diagnose guard 
 - No orchestrator relays work: the main session implements.
 - The reviewer gets a bundle (brief, diff or plan, PR discussion), not the conversation.
 - At most 3 pre-push reviews per round, plus one verify call that checks fixes to the last round's findings, and at most 2 plan design reviews for a complex task. The first runs on Haiku, and so does every call once the PR exists, every call in a later round, and every verify call.
-- A new round starts with each comment or CI fix round on the PR, or when you ask shepherd to re-run reviews.
+- A new round starts with each comment or CI fix round on the PR, or when you ask shepherd to re-run reviews (`shepherd.sh review-round --user --reason "..."`).
 - Small deltas such as formatter output, test-only fixes, and clean merges skip re-review.
 - CI and hosted review are waited on by background commands, not by polling turns.
 
