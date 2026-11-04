@@ -12,9 +12,12 @@
 #   policy-base add|remove             clean checkout of the target branch tip
 #   bundle [--plan] [--findings FILE] [--verified TEXT]   write the review bundle, print its path;
 #                                      --plan bundles plan.md for a design review instead of the diff
-#   review-start [--plan]              reserve the next review in the budget; --plan uses the
-#                                      separate plan-review budget
-#   clear --reviewed | --remediated | --exempt CLASS --reason WHY
+#   review-start [--plan|--verify]     reserve the next review in this round's budget; --plan uses
+#                                      the separate plan-review budget; --verify reserves the one
+#                                      extra call that checks fixes once the round's budget is spent
+#   review-round --reason WHY [--user] start a new review round with a fresh budget; without --user
+#                                      it needs a PR and a reviewed or remediated clear this round
+#   clear --reviewed | --remediated --reason WHY | --exempt CLASS --reason WHY
 #   threads                            unresolved PR review threads as JSON
 #   reply COMMENT_ID FILE | resolve THREAD_ID
 #   wait-review [--timeout SECONDS]    block until a new PR review or comment lands
@@ -75,6 +78,7 @@ cmd_init() {
         issue: (if $issue == "" then null else ($issue | tonumber) end),
         pr: (if $pr == "" then null else ($pr | tonumber) end),
         reviews: 0, max_reviews: $max, plan_reviews: 0, max_plan_reviews: $max_plan, hosted_rounds: 0,
+        review_round: 1, round_reopenable: false, verified_round: null, remediated_round: null,
         review_candidate: null, previous_candidate: null, reviewed_head: null, reviewed_tree: null, cleared_tree: null,
         policy_base_dir: null, policy_base_sha: null,
         stop_blocks: 0, created_at: $now, updated_at: $now}' >"$dir/state.json"
@@ -321,13 +325,65 @@ cmd_review_start_plan() {
   echo "plan call $n of $max"
 }
 
+current_round() {
+  local round
+  round=$(shepherd_get review_round)
+  echo "${round:-1}"
+}
+
+# A state.json written before review rounds existed has no round_reopenable:
+# treat a recorded reviewed clear as reopenable so that branch is not stuck.
+round_reopenable() {
+  jq -e 'if has("round_reopenable") then .round_reopenable else .reviewed_tree != null end' \
+    "$(shepherd_state_file)" >/dev/null
+}
+
+cmd_review_start_verify() {
+  local round head
+  round=$(current_round)
+  (( $(shepherd_get reviews) >= $(shepherd_get max_reviews) )) \
+    || die "round $round has review budget left; run a normal review instead"
+  [[ "$(shepherd_get verified_round)" != "$round" ]] \
+    || die "the verify call for round $round is spent. Ask the user: start a new round, or accept as is with \`shepherd clear --remediated --reason <answer>\`."
+  [[ -z "$(git status --porcelain --untracked-files=no)" ]] || die "commit the exact state to review first"
+  head=$(git rev-parse HEAD)
+  shepherd_set "previous_candidate=$(shepherd_get review_candidate)" "review_candidate=$head" \
+    "phase=review" "verified_round:=$round"
+  cmd_decision --title "verify call for round $round reserved at $head" \
+    --decision "dispatched" --why "tree $(git rev-parse 'HEAD^{tree}')"
+  echo "verify call for round $round"
+}
+
+cmd_review_round() {
+  require_active
+  local reason="" user="" round
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason) reason="$2"; shift 2 ;;
+      --user) user=1; shift ;;
+      *) die "review-round: unknown argument $1" ;;
+    esac
+  done
+  [[ -n "$reason" ]] || die "review-round needs --reason"
+  if [[ -z "$user" ]]; then
+    [[ -n "$(shepherd_get pr)" ]] || die "no PR yet; keep the current round"
+    round_reopenable || die "no reviewed or remediated clear since round $(current_round) began; keep the current round"
+  fi
+  round=$(( $(current_round) + 1 ))
+  shepherd_set "review_round:=$round" "reviews:=0" "round_reopenable:=false"
+  cmd_decision --title "review round $round started" \
+    --decision "${user:+user request; }budget reset to 0 of $(shepherd_get max_reviews)" --why "$reason"
+  echo "review round $round"
+}
+
 cmd_review_start() {
   require_active
   [[ "$1" == "--plan" ]] && { cmd_review_start_plan; return; }
+  [[ "$1" == "--verify" ]] && { cmd_review_start_verify; return; }
   local n max head
   n=$(shepherd_get reviews)
   max=$(shepherd_get max_reviews)
-  (( n < max )) || die "review budget spent ($n of $max). Fix the last findings, run checks, then \`shepherd clear --remediated\`."
+  (( n < max )) || die "review budget spent ($n of $max). Fix the last findings, commit, then \`shepherd review-start --verify\`."
   [[ -z "$(git status --porcelain --untracked-files=no)" ]] || die "commit the exact state to review first"
   n=$((n + 1))
   head=$(git rev-parse HEAD)
@@ -340,7 +396,7 @@ cmd_review_start() {
 
 cmd_clear() {
   require_active
-  local mode="" class="" reason="" tree candidate
+  local mode="" class="" reason="" tree candidate round
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --reviewed|--remediated) mode="${1#--}"; shift ;;
@@ -358,15 +414,26 @@ cmd_clear() {
       [[ -n "$candidate" ]] || die "no review in flight"
       [[ "$(git rev-parse "$candidate^{tree}")" == "$tree" ]] \
         || die "HEAD tree differs from the reviewed candidate $candidate; the review does not cover it"
-      shepherd_set "reviewed_head=$(git rev-parse HEAD)" "reviewed_tree=$tree" "cleared_tree=$tree" "phase=push"
+      shepherd_set "reviewed_head=$(git rev-parse HEAD)" "reviewed_tree=$tree" "cleared_tree=$tree" "phase=push" \
+        "round_reopenable:=true"
       cmd_decision --title "review clean at $(git rev-parse HEAD)" --decision "cleared" --why "current at $candidate"
       ;;
     remediated)
+      round=$(current_round)
       (( $(shepherd_get reviews) >= $(shepherd_get max_reviews) )) \
         || die "--remediated is only for the last review in the budget; review again instead"
-      shepherd_set "reviewed_head=$(git rev-parse HEAD)" "reviewed_tree=$tree" "cleared_tree=$tree" "phase=push"
-      cmd_decision --title "budget spent, remediated at $(git rev-parse HEAD)" \
-        --decision "cleared after fixing the final review's findings" --why "${reason:-targeted checks passed}"
+      [[ "$(shepherd_get verified_round)" == "$round" ]] \
+        || die "run the verify call first: \`shepherd review-start --verify\`"
+      [[ "$(shepherd_get remediated_round)" != "$round" ]] \
+        || die "round $round was already remediated; start a new round with \`shepherd review-round\`"
+      [[ -n "$reason" ]] || die "--remediated needs --reason with the user's answer"
+      candidate=$(shepherd_get review_candidate)
+      [[ "$(git rev-parse "$candidate^{tree}")" == "$tree" ]] \
+        || die "HEAD tree differs from the verify call's candidate $candidate; the user's answer does not cover it"
+      shepherd_set "reviewed_head=$(git rev-parse HEAD)" "reviewed_tree=$tree" "cleared_tree=$tree" "phase=push" \
+        "remediated_round:=$round" "round_reopenable:=true"
+      cmd_decision --title "round $round remediated at $(git rev-parse HEAD)" \
+        --decision "cleared with the verify call's findings open, on the user's answer" --why "$reason"
       ;;
     exempt)
       shepherd_in_list "$class" "$EXEMPT_CLASSES" || die "exempt class must be one of: $EXEMPT_CLASSES"
@@ -377,7 +444,7 @@ cmd_clear() {
       cmd_decision --title "exempt delta ($class) at $(git rev-parse HEAD)" \
         --decision "pushed without re-review" --why "$reason; chains from reviewed $candidate"
       ;;
-    *) die "clear --reviewed | --remediated | --exempt CLASS --reason WHY" ;;
+    *) die "clear --reviewed | --remediated --reason WHY | --exempt CLASS --reason WHY" ;;
   esac
 }
 
@@ -500,11 +567,12 @@ case "$sub" in
   policy-base) cmd_policy_base "$@" ;;
   bundle) cmd_bundle "$@" ;;
   review-start) cmd_review_start "$@" ;;
+  review-round) cmd_review_round "$@" ;;
   clear) cmd_clear "$@" ;;
   threads) require_active; cmd_threads ;;
   reply) require_active; cmd_reply "$@" ;;
   resolve) cmd_resolve "$@" ;;
   wait-review) cmd_wait_review "$@" ;;
   diagnose) cmd_diagnose "$@" ;;
-  *) sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
