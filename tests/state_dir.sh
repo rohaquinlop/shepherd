@@ -42,12 +42,13 @@ ok "second run no-op" '[[ -z "$(sh "$T/b" status 2>&1 >/dev/null)" ]]'
 ok "no lock left" '[[ ! -e "$B.migrate.lock" ]]'
 
 # collision
-mkdir -p "$L/fix__y" "$L/other"; echo '{"phase":"study"}' > "$L/fix__y/state.json"; echo '{}' > "$L/other/state.json"
+mkdir -p "$L/fix__y" "$L/other"; touch "$L/.DS_Store"; echo '{"phase":"study"}' > "$L/fix__y/state.json"; echo '{}' > "$L/other/state.json"
 err=$(sh "$T/b" status 2>&1 >/dev/null)
 ok "collision: new kept" '[[ "$(jq -r .phase "$B/fix__y/state.json")" == implement ]]'
 ok "collision: old copy moved aside" '[[ "$(jq -r .phase "$B/fix__y.legacy/state.json")" == study ]]'
 ok "collision: warning names both" 'grep -q "$B/fix__y.legacy" <<<"$err" && grep -q "kept $B/fix__y" <<<"$err"'
 ok "collision: free entry moved" '[[ -f "$B/other/state.json" && ! -e "$L" ]]'
+ok "collision: dotfile moved, legacy dir gone" '[[ -e "$B/.DS_Store" && ! -e "$L" ]]'
 ok "collision: warns once" '[[ -z "$(sh "$T/b" status 2>&1 >/dev/null)" ]]'
 
 # stale lock

@@ -89,7 +89,7 @@ shepherd_migrate_legacy() {
   if [[ ! -e "$base" ]]; then
     mv "$legacy" "$base"
   else
-    for entry in "$legacy"/*; do
+    for entry in "$legacy"/* "$legacy"/.[!.]* "$legacy"/..?*; do
       [[ -e "$entry" ]] || continue
       target="$base/${entry##*/}"
       if [[ -e "$target" ]]; then
