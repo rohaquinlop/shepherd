@@ -131,7 +131,7 @@ pre-push reviews. Nothing is committed or pushed.
 - Add or update tests: one that fails without the change and passes with it.
 - Run the targeted checks only (the changed files and their tests), not the whole suite.
 - Commit in small conventional commits. Stage only files you changed. Never stage secrets, `.env`
-  files, backups, or `.claude/shepherd/`.
+  files, or backups.
 
 ## 3. Review gate
 
@@ -279,4 +279,4 @@ were in.
 - Run more than `max_reviews` calls plus one verify call in a round, or run
   `review-round --user` without the user's request. Treat the review gate as test execution.
 - Leave the session with uncommitted changes in an active phase.
-- Commit `.claude/shepherd/`, `.env` files, or secrets.
+- Commit `.env` files or secrets.
