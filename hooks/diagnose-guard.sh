@@ -2,7 +2,9 @@
 # PreToolUse hook on Edit, Write, MultiEdit, NotebookEdit, and Bash. While a
 # diagnosis is active in this worktree, keep it a diagnosis:
 #   - file edits inside the repo are allowed only in the write-up, in
-#     docs/diagnoses/, and in the diagnosis scratch dir
+#     docs/diagnoses/, and in the diagnosis scratch dir; edits to shepherd
+#     state in the git dir are denied even when that dir is outside the repo
+#     (a linked worktree)
 #   - git commands that commit, move, or rewrite work are denied
 # Files outside the repo (memory, temp dirs) and read-only git commands pass.
 # Shell redirects and in-place edits (sed -i, >) are not caught: the skill's
@@ -47,10 +49,11 @@ case "$tool" in
     target=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' <<<"$input")
     [[ -n "$target" ]] || exit 0
     target=$(physical "$target")
+    [[ "$target" == "$(physical "$scratch")"/* ]] && exit 0
+    [[ "$target" == "$(physical "$(shepherd_base)")"/* ]] && deny "editing $target is blocked."
     [[ "$target" == "$root"/* ]] || exit 0
     [[ "$target" == "$(physical "$writeup")" ]] && exit 0
     [[ "$target" == "$root/docs/diagnoses/"* ]] && exit 0
-    [[ "$target" == "$(physical "$scratch")"/* ]] && exit 0
     deny "editing $target is blocked."
     ;;
   Bash)

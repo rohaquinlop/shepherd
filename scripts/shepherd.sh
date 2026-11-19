@@ -2,7 +2,7 @@
 # shepherd CLI. The run skill calls this for every state change, so the hooks
 # and a resumed session always see the same truth on disk.
 #
-#   init [--issue N] [--pr N] [--jira KEY] [--url URL]   create branch state, exclude it from git
+#   init [--issue N] [--pr N] [--jira KEY] [--url URL]   create branch state
 #   dir                                print this branch's state dir
 #   branch-name --summary TEXT [--ref REF] [--type TYPE] [--apply]   render the branch pattern;
 #                                      --apply switches to it when the branch is fresh
@@ -47,8 +47,6 @@ cmd_init() {
   done
   dir=$(shepherd_dir) || die "not inside a git repository"
   mkdir -p "$dir"
-
-  shepherd_exclude_state
 
   [[ -f "$dir/brief.md" ]] || cp "$PLUGIN_ROOT/templates/brief.md" "$dir/brief.md"
   [[ -f "$dir/decisions.md" ]] || cp "$PLUGIN_ROOT/templates/decisions.md" "$dir/decisions.md"
@@ -477,8 +475,8 @@ cmd_diagnose() {
   root=$(shepherd_root)
   [[ -n "$root" ]] || { diagnose_outside_repo "$@"; return; }
   shift
-  dir="$root/.claude/shepherd/_diagnose"
   file=$(shepherd_diagnose_file)
+  dir=$(dirname "$file")
   case "$sub" in
     start)
       [[ "$1" == "--slug" && -n "$2" ]] || die "diagnose start --slug SLUG"
@@ -486,7 +484,6 @@ cmd_diagnose() {
       if shepherd_diagnose_active && [[ "$(jq -r .slug "$file")" != "$slug" ]]; then
         die "diagnosis '$(jq -r .slug "$file")' is still active; end it first"
       fi
-      shepherd_exclude_state
       scratch="$dir/scratch/$slug"
       mkdir -p "$scratch" "$root/docs/diagnoses"
       existing=$(find "$root/docs/diagnoses" -maxdepth 1 -name "*-$slug.md" | head -1)

@@ -145,7 +145,7 @@ shepherd reads a story through a Jira or Atlassian MCP server when one is connec
 
 ## State
 
-Per branch, in `.claude/shepherd/<branch>/`, excluded from git through `.git/info/exclude`:
+Per branch, in `shepherd/<branch>/` under the worktree's git dir (`git rev-parse --git-dir`: `.git/` in the main worktree, `.git/worktrees/<name>/` in a linked one). It is outside the work tree, so git never sees it and Claude Code's Bash edit diff does not list it (checked in Claude Code 2.1.328). Each worktree has its own, so parallel sessions in different worktrees never share state:
 
 - `brief.md`: the task contract
 - `source.md`: the Jira story or pasted text, verbatim
@@ -154,7 +154,9 @@ Per branch, in `.claude/shepherd/<branch>/`, excluded from git through `.git/inf
 - `last-bundle.md`: the last review bundle, kept when the clean checkout is removed
 - `state.json`: phase, PR, review budget, cleared tree
 
-Per worktree, for an active diagnosis, in `.claude/shepherd/_diagnose/`: `active.json` (turns the guard on) and `scratch/<slug>/` for probes. The write-up itself is in `docs/diagnoses/`, which is not excluded from git: commit it only if you want it in the repo.
+Per worktree, for an active diagnosis, in `shepherd/_diagnose/` under the same git dir: `active.json` (turns the guard on) and `scratch/<slug>/` for probes. The write-up itself is in `docs/diagnoses/`, which is not excluded from git: commit it only if you want it in the repo.
+
+Older versions kept this in `.claude/shepherd/` in the work tree. The first shepherd command or hook in that worktree moves it to the git dir.
 
 ## Limits
 
