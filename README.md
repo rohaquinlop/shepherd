@@ -145,7 +145,7 @@ shepherd reads a story through a Jira or Atlassian MCP server when one is connec
 
 ## State
 
-Per branch, in `shepherd/<branch>/` under the worktree's git dir (`git rev-parse --git-dir`: `.git/` in the main worktree, `.git/worktrees/<name>/` in a linked one). It is outside the work tree, so git never sees it and Claude Code does not show it in Bash edit diffs. Each worktree has its own, so parallel sessions in different worktrees never share state:
+Per branch, in `shepherd/<branch>/` under the worktree's git dir (`git rev-parse --git-dir`: `.git/` in the main worktree, `.git/worktrees/<name>/` in a linked one). It is outside the work tree, so git never sees it and Claude Code's Bash edit diff does not list it (checked in Claude Code 2.1.328). Each worktree has its own, so parallel sessions in different worktrees never share state:
 
 - `brief.md`: the task contract
 - `source.md`: the Jira story or pasted text, verbatim
