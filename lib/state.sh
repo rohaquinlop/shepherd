@@ -3,10 +3,10 @@
 # Sourced, never executed.
 #
 # State lives in the worktree's git dir (`git rev-parse --git-dir`)/shepherd/,
-# outside the work tree: Claude Code diffs every work-tree file a Bash command
-# changes, git-ignored or not, but not files under .git/. The per-worktree git
-# dir keeps parallel sessions in different worktrees apart, even two on a
-# detached HEAD.
+# outside the work tree: Claude Code (seen in 2.1.328) diffs every work-tree
+# file a Bash command changes, git-ignored or not, but not files under .git/.
+# The per-worktree git dir keeps parallel sessions in different worktrees
+# apart, even two on a detached HEAD.
 #
 # Per branch, under shepherd/<branch>/:
 #   brief.md      task contract: scope, success criteria, constraints
@@ -66,6 +66,11 @@ shepherd_lock() {
     fi
     sleep 0.1
   done
+  if [[ -z "$(cat "$lock/pid" 2>/dev/null)" ]]; then
+    echo "shepherd: removing stale lock $lock (no pid after 5s)" >&2
+    rm -rf "$lock"
+    mkdir "$lock" 2>/dev/null && printf '%s\n' "$$" >"$lock/pid" && return 0
+  fi
   echo "shepherd: lock $lock is still held; state in .claude/shepherd/ not moved yet" >&2
   return 1
 }
@@ -88,10 +93,10 @@ shepherd_migrate_legacy() {
       [[ -e "$entry" ]] || continue
       target="$base/${entry##*/}"
       if [[ -e "$target" ]]; then
-        echo "shepherd: kept $target; old copy left in $entry" >&2
-      else
-        mv "$entry" "$target"
+        [[ -e "$target.legacy" ]] && target="$target.legacy.$$" || target="$target.legacy"
+        echo "shepherd: kept $base/${entry##*/}; old copy moved to $target" >&2
       fi
+      mv "$entry" "$target"
     done
     rmdir "$legacy" 2>/dev/null
   fi
