@@ -3,7 +3,7 @@
 # usage: bash tests/state_dir.sh [shepherd checkout]   (default: this checkout)
 set -u
 REPO="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"; CLI="$REPO/scripts/shepherd.sh"; HOOKS="$REPO/hooks"
-T=$(mktemp -d); pass=0; fail=0
+T=$(cd "$(mktemp -d)" && pwd -P); pass=0; fail=0
 ok() { if eval "$2"; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }
 mkrepo() { git init -q -b main "$1" && git -C "$1" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init; }
 sh() { (cd "$1" && shift && bash "$CLI" "$@"); }
