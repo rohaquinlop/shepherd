@@ -322,10 +322,10 @@ default*. If a notification tool is available, send one too.
 - Missing access: credentials, VPN, a required secret. Give the exact command the user must run.
 - The verify call still has findings on the last round's fixes.
 
-When the user answers, record the answer with `$SHEPHERD decision`, run
-`$SHEPHERD set question:=null` (on every way out of `waiting_user`), and continue from the phase
-you were in. In a fleet slice the answer may come from the lead instead of the user; treat it the
-same way.
+When the user answers, record the answer with `$SHEPHERD decision`, then leave `waiting_user` and
+clear the question in one call: `$SHEPHERD set phase=<the phase you were in> question:=null`. A
+fleet lead must never see the question cleared while the phase still says `waiting_user`. In a
+fleet slice the answer may come from the lead instead of the user; treat it the same way.
 
 ## Never
 

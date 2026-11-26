@@ -53,6 +53,7 @@ wt() { jq -r --arg n "$1" '.slices[$n].worktree' "$rec"; }
 sess() { jq -r --arg n "$1" '.slices[$n].session' "$rec"; }
 agents() { jq -n --argjson s "$1" '[$s | to_entries[] | {sessionId: .key, state: .value, status: "idle"}]' > "$FAKE/agents.json"; }
 state() { local w; w=$(wt "$1"); shift; sh "$w" init >/dev/null; sh "$w" set "$@"; }
+plan_sed() { sed -i.bak "$1" "$P" && rm "$P.bak"; }
 order() { sh "$A" fleet status --json | jq -c '[.[].slice]'; }
 
 out=$(sh "$A" fleet start "$P" --max 3)
@@ -95,15 +96,15 @@ ok "wait skips the lead's own dispatch" '[[ "$(sh "$A" fleet wait --timeout 0)" 
 printf '### slice-5: added\n- **Depends on:** slice-3\n- **Files:** `e.sh`\n' >> "$P"
 sh "$A" fleet next >/dev/null
 ok "next adds a slice appended by a re-plan" '[[ "$(jq -c ".slices[\"5\"] | [.title, .depends]" "$rec")" == '"'"'["added",[3]]'"'"' && "$(jq -r ".slices[\"3\"].session" "$rec")" != null ]]'
-sed -i.bak 's/^### slice-5: added$/### slice-5: renamed/' "$P" && rm "$P.bak"
+plan_sed 's/^### slice-5: added$/### slice-5: renamed/'
 sh "$A" fleet next >/dev/null
 ok "next takes an edit to a slice that has not started" '[[ "$(jq -r ".slices[\"5\"].title" "$rec")" == renamed ]]'
-sed -i.bak 's/^- \*\*Depends on:\*\* slice-3$/- **Depends on:** slice-3, slice-9/' "$P" && rm "$P.bak"
+plan_sed 's/^- \*\*Depends on:\*\* slice-3$/- **Depends on:** slice-3, slice-9/'
 ok "next refuses an edit to an unknown dependency" '! sh "$A" fleet next 2>/dev/null && [[ "$(jq -c ".slices[\"5\"].depends" "$rec")" == "[3]" ]]'
-sed -i.bak 's/^- \*\*Depends on:\*\* slice-3, slice-9$/- **Depends on:** slice-3/' "$P" && rm "$P.bak"
+plan_sed 's/^- \*\*Depends on:\*\* slice-3, slice-9$/- **Depends on:** slice-3/'
 printf '### slice-6: bad\n- **Depends on:** slice-9\n- **Files:** `f.sh`\n' >> "$P"
 ok "next refuses a re-plan with an unknown dependency" '! sh "$A" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"6\"]" "$rec")" == null ]]'
-sed -i.bak '/^### slice-6/,$d' "$P" && rm "$P.bak"
+plan_sed '/^### slice-6/,$d'
 mv "$P" "$P.away"
 ok "next fails when the proposal is gone" '! sh "$A" fleet next 2>/dev/null'
 mv "$P.away" "$P"
