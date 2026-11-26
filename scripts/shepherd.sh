@@ -88,6 +88,7 @@ cmd_init() {
         policy_base_dir: null, policy_base_sha: null,
         stop_blocks: 0, created_at: $now, updated_at: $now}' >"$dir/state.json"
   fi
+  shepherd_install_git_gate "$PLUGIN_ROOT" || echo "shepherd: git push gate not installed; the PreToolUse hook still gates pushes" >&2
   echo "$dir"
 }
 

@@ -214,3 +214,69 @@ shepherd_in_list() {
   done
   return 1
 }
+
+# Hooks that run on the client side and do nothing when absent. Each gets a
+# stub in the gate dir that runs the repo's own hook (hooks/git-chain.sh).
+SHEPHERD_CLIENT_HOOKS="applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit
+  prepare-commit-msg commit-msg post-commit pre-rebase post-checkout post-merge post-rewrite
+  pre-auto-gc reference-transaction sendemail-validate post-index-change"
+
+shepherd_githooks_dir() {
+  local base
+  base=$(shepherd_base) || return 1
+  printf '%s/_githooks' "$base"
+}
+
+shepherd_uninstall_git_gate() {
+  local dir
+  dir=$(shepherd_githooks_dir) || return 1
+  if [[ "$(git config --worktree core.hooksPath 2>/dev/null)" == "$dir" ]]; then
+    git config --worktree --unset core.hooksPath
+  fi
+  rm -rf "$dir"
+}
+
+# Point this worktree's core.hooksPath at a gate dir whose pre-push runs
+# hooks/git-pre-push.sh, then the repo's own pre-push. The setting is per
+# worktree (extensions.worktreeConfig), so other worktrees keep their hooks.
+# Skipped, with a warning, when the shared config has core.worktree or
+# core.bare=true (git-worktree(1): those must leave the shared config once the
+# extension is on), when the extension is off on purpose, or when this
+# worktree sets its own core.hooksPath. Reinstalls, so a new plugin path takes.
+# `git worktree add` copies config.worktree, so a new worktree may point at
+# another worktree's gate dir; that path is replaced with its own.
+shepherd_install_git_gate() {
+  local root="$1" dir config ext current name skip=""
+  config="$(git rev-parse --path-format=absolute --git-common-dir)/config" || return 1
+  dir=$(shepherd_githooks_dir) || return 1
+  ext=$(git config --file "$config" --type=bool extensions.worktreeConfig)
+  current=$(git config --worktree core.hooksPath 2>/dev/null)
+  if [[ -n "$(git config --file "$config" core.worktree)" \
+    || "$(git config --file "$config" --type=bool core.bare)" == true ]]; then
+    skip="core.worktree or core.bare=true is set in $config"
+  elif [[ "$ext" == false ]]; then
+    skip="extensions.worktreeConfig is false in $config"
+  elif [[ -n "$current" && "$current" != */shepherd/_githooks ]]; then
+    skip="this worktree sets core.hooksPath=$current"
+  fi
+  if [[ -n "$skip" ]]; then
+    echo "shepherd: $skip; git push gate not installed, the PreToolUse hook still gates pushes" >&2
+    return 0
+  fi
+  [[ -n "$ext" ]] || git config --file "$config" extensions.worktreeConfig true || return 1
+  shepherd_uninstall_git_gate
+  mkdir -p "$dir" && cp "$root/hooks/git-chain.sh" "$dir/chain" || return 1
+  for name in $SHEPHERD_CLIENT_HOOKS; do
+    printf '#!/bin/sh\nexec "$(dirname "$0")/chain" %s "$@"\n' "$name" >"$dir/$name"
+  done
+  printf '%s\n' '#!/bin/sh' "gate='$root/hooks/git-pre-push.sh'" \
+    'if [ ! -f "$gate" ]; then' \
+    '  echo "shepherd: push gate $gate is missing. Run \`shepherd init\` on this branch to reinstall it, or \`git config --worktree --unset core.hooksPath\` to remove it." >&2' \
+    '  exit 1' \
+    'fi' \
+    'refs=$(cat)' \
+    'printf "%s\n" "$refs" | bash "$gate" "$@" || exit 1' \
+    'printf "%s\n" "$refs" | exec "$(dirname "$0")/chain" pre-push "$@"' >"$dir/pre-push"
+  chmod +x "$dir"/*
+  git config --worktree core.hooksPath "$dir"
+}

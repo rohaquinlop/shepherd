@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Push gates on a throwaway repo with a local bare origin: the PreToolUse hook
+# (hooks/pre-push.sh) and the git gate `shepherd init` installs.
+# usage: bash tests/hooks.sh [shepherd checkout]   (default: this checkout)
+set -u
+REPO="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"; CLI="$REPO/scripts/shepherd.sh"; HOOKS="$REPO/hooks"
+T=$(cd "$(mktemp -d)" && pwd -P); pass=0; fail=0
+ok() { if eval "$2"; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }
+commit() { git -C "$1" -c user.name=t -c user.email=t@t commit -q "${@:2}"; }
+
+git init -q --bare "$T/origin.git"
+git init -q -b main "$T/r"; commit "$T/r" --allow-empty -m init
+git -C "$T/r" remote add origin "$T/origin.git"
+mkdir "$T/r/.husky"
+for h in pre-push pre-commit; do
+  printf '#!/bin/sh\necho "%s $*" >>"%s/repo-hook.log"\n' "$h" "$T" >"$T/r/.husky/$h"; chmod +x "$T/r/.husky/$h"
+done
+git -C "$T/r" config core.hooksPath .husky
+git -C "$T/r" add .husky; commit "$T/r" -m husky; git -C "$T/r" push -q origin main
+: >"$T/repo-hook.log"
+W="$T/wt"; git -C "$T/r" worktree add -q -b feat/x "$W" main
+(cd "$W" && bash "$CLI" init >/dev/null)
+commit "$W" --allow-empty -m a
+
+probe() { jq -n --arg c "$1" --arg d "$W" '{tool_name:"Bash", tool_input:{command:$c}, cwd:$d}' | bash "$HOOKS/pre-push.sh"; }
+denied() { probe "$1" | grep -q '"deny"'; }
+pushes() { (cd "$W" && eval "$1") >/dev/null 2>&1; }
+clear_head() { (cd "$W" && bash "$CLI" set "cleared_tree=$(git rev-parse 'HEAD^{tree}')"); }
+
+# 1. uncleared tree: hook denies and git rejects every shape
+shapes=(
+  $'echo ok\ngit push origin feat/x'
+  'bash -c "git push origin feat/x"'
+  'command git push origin feat/x'
+  '`git push origin feat/x`'
+  'env FOO=1 git push origin feat/x'
+  'git push origin +feat/x'
+)
+for c in "${shapes[@]}"; do
+  ok "hook denies uncleared: ${c//$'\n'/\\n}" 'denied "$c"'
+  ok "git rejects uncleared: ${c//$'\n'/\\n}" '! pushes "$c"'
+done
+ok "origin has no feat/x" '! git -C "$T/origin.git" rev-parse -q --verify refs/heads/feat/x >/dev/null'
+ok "main worktree keeps its hooksPath" '[[ "$(git -C "$T/r" config core.hooksPath)" == .husky ]]'
+
+# 2. cleared tree: force, --no-verify, and hooksPath overrides still denied
+clear_head
+for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push -uf origin feat/x' \
+  'git push origin +feat/x' 'git push --force-with-lease origin feat/x' 'git push --no-verify origin feat/x' \
+  'git -c core.hooksPath=/dev/null push origin feat/x'; do
+  ok "hook denies: $c" 'denied "$c"'
+done
+ok "push then rm -f is not a force push" '! denied "git push origin feat/x && rm -f x"'
+ok "cleared push passes" 'pushes "git push -u origin feat/x"'
+ok "git gate chains to the repo pre-push" 'grep -q "^pre-push origin" "$T/repo-hook.log"'
+commit "$W" --amend --allow-empty -m b; clear_head
+ok "git rejects a rewrite of a cleared tree" '! pushes "git push --force origin feat/x"'
+
+# 3. merges
+ok "hook denies gh pr merge on line 2" 'denied $'"'"'echo ok\ngh pr merge 1'"'"''
+ok "hook denies gh api PUT merge" 'denied "gh api -X PUT repos/o/r/pulls/1/merge"'
+ok "hook allows gh api GET merge" '! denied "gh api repos/o/r/pulls/1/merge"'
+
+# 4. no jq on PATH
+mkdir "$T/bin"; for b in cat dirname git; do ln -s "$(command -v "$b")" "$T/bin/$b"; done
+nojq() { jq -n --arg c "$1" --arg d "$W" '{tool_input:{command:$c}, cwd:$d}' | PATH="$T/bin" "$BASH" "$HOOKS/pre-push.sh" 2>/dev/null; }
+ok "no jq: push denied" 'nojq "git push origin feat/x"; [[ $? == 2 ]]'
+ok "no jq: other command passes" 'nojq "ls"'
+
+# 5. other hooks chain; a branch without state passes the git gate
+: >"$T/repo-hook.log"
+commit "$W" --allow-empty -m c
+ok "repo pre-commit still runs in the gated worktree" 'grep -q "^pre-commit" "$T/repo-hook.log"'
+git -C "$W" switch -q -c other
+ok "stateless branch push passes" 'pushes "git push origin other" && grep -q "^pre-push origin" "$T/repo-hook.log"'
+
+W2="$T/wt2"; git -C "$W" worktree add -q -b feat/y "$W2" main
+(cd "$W2" && bash "$CLI" init >/dev/null 2>&1)
+ok "a worktree added from a gated one gets its own gate" \
+  '[[ "$(git -C "$W2" config --worktree core.hooksPath)" == "$T/r/.git/worktrees/wt2/shepherd/_githooks" ]]'
+
+echo "pass=$pass fail=$fail"; git -C "$T/r" worktree remove --force "$W"; git -C "$T/r" worktree remove --force "$W2"; rm -rf "$T"
+(( fail == 0 ))
