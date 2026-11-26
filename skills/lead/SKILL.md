@@ -47,7 +47,7 @@ If `fleet wait` timed out with no change, start it again and end the turn. Other
 - **stalled**: report it to the user with `claude attach` and `claude logs`; do not restart it yourself.
 - **running**, **pending**: nothing.
 
-Re-plan when a slice reports work its scope does not cover: add a new `### slice-N:` to the proposal with its dependencies, files, and tests, then `fleet next`, which adds it to the fleet record and starts it when it is free. Never widen a running slice.
+Re-plan when a slice reports work its scope does not cover: add a new `### slice-N:` to the proposal with its dependencies, files, and tests (or edit a slice that has not started), then `fleet next`, which takes the change into the fleet record and starts the slice when it is free. Edits to a started slice do not apply; never widen a running slice.
 
 Then re-arm (step 2.3). The first time every slice is ready or merged, report first (step 4).
 

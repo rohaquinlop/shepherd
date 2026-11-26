@@ -21,7 +21,7 @@ fleet_dir() { printf '%s/_fleet' "$(shepherd_common_base)"; }
 fleet_write() {
   local record="$1" tmp rc=1
   shift
-  shepherd_lock "$record.lock" || return 1
+  shepherd_lock "$record.lock" 2>/dev/null || { echo "shepherd: fleet record $record is locked by another write" >&2; return 1; }
   tmp=$(mktemp "$record.XXXXXX") && jq "$@" "$record" >"$tmp" && mv "$tmp" "$record" && rc=0
   (( rc == 0 )) || rm -f "$tmp"
   rm -rf "$record.lock"
@@ -170,7 +170,8 @@ fleet_missing() {
   jq -r '(keys) as $k | [.[].depends[] | tostring | select(. as $d | $k | index($d) | not)] | unique | map("slice-" + .) | join(", ")' <<<"$1"
 }
 
-# Adds the slices a re-plan appended to the proposal; started slices stay as recorded.
+# Takes a re-plan from the proposal: new slices, and edits to slices that have
+# not started. A started slice stays as recorded.
 fleet_sync() {
   local record="$1" proposal slices missing
   proposal=$(jq -r .proposal "$record")
@@ -178,7 +179,9 @@ fleet_sync() {
   slices=$(fleet_slices "$proposal")
   missing=$(fleet_missing "$(jq --argjson s "$slices" '$s + .slices' "$record")")
   [[ -z "$missing" ]] || die "unknown dependency: $missing"
-  fleet_write "$record" --argjson s "$slices" '.slices = $s + .slices' || die "cannot write the fleet record"
+  fleet_write "$record" --argjson s "$slices" \
+    '.slices = ($s + .slices | with_entries(if .value.session == null and $s[.key] != null then .value = $s[.key] else . end))' \
+    || die "cannot write the fleet record"
 }
 
 fleet_next() {
@@ -288,6 +291,10 @@ fleet_answer() {
   # and resume from its own worktree.
   fleet_halt "$session"
   (cd "$wt" && claude --bg --resume "$session" "$(cat "$file")" >/dev/null) || die "cannot resume slice-$n"
+  # The answered slice runs again; mark it so, or a new question from it
+  # before the next wait would match the old one in `.seen`.
+  fleet_write "$record" --argjson n "$n" '.seen |= (if . == null then . else map(if .slice == $n then .category = "running" else . end) end)' \
+    || die "slice-$n answered, but the fleet record was not updated"
   echo "answered slice-$n"
 }
 
@@ -354,6 +361,6 @@ cmd_fleet() {
     stop) fleet_stop "$record" ;;
     lead) fleet_lead "$record" "$1" ;;
     base) fleet_set_base "$record" "$@" ;;
-    *) die "fleet start <proposal> [--max N] | [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | base N BRANCH | stop | lead PHASE | self" ;;
+    *) die "fleet start <proposal> [--max N] | status [--json] | wait [--timeout S] | next | answer N FILE | base N BRANCH | stop | lead PHASE (each takes --fleet SLUG after it) | self" ;;
   esac
 }

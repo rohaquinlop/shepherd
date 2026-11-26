@@ -91,6 +91,9 @@ ok "wait skips the lead's own dispatch" '[[ "$(sh "$A" fleet wait --timeout 0)" 
 printf '### slice-5: added\n- **Depends on:** slice-3\n- **Files:** `e.sh`\n' >> "$P"
 sh "$A" fleet next >/dev/null
 ok "next adds a slice appended by a re-plan" '[[ "$(jq -c ".slices[\"5\"] | [.title, .depends]" "$rec")" == '"'"'["added",[3]]'"'"' && "$(jq -r ".slices[\"3\"].session" "$rec")" != null ]]'
+sed -i.bak 's/^### slice-5: added$/### slice-5: renamed/' "$P" && rm "$P.bak"
+sh "$A" fleet next >/dev/null
+ok "next takes an edit to a slice that has not started" '[[ "$(jq -r ".slices[\"5\"].title" "$rec")" == renamed ]]'
 printf '### slice-6: bad\n- **Depends on:** slice-9\n- **Files:** `f.sh`\n' >> "$P"
 ok "next refuses a re-plan with an unknown dependency" '! sh "$A" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"6\"]" "$rec")" == null ]]'
 sed -i.bak '/^### slice-6/,$d' "$P" && rm "$P.bak"
@@ -104,6 +107,10 @@ sh "$A" fleet answer 4 "$T/answer.txt" >/dev/null
 ok "answer stops, then resumes in the worktree" '[[ "$(cut -f2 "$FAKE/claude.log" | head -1)" == "stop $(sess 4 | cut -c1-8)" ]] && grep -q "^$(wt 4)	--bg --resume $(sess 4) use option b$" "$FAKE/claude.log"'
 : > "$FAKE/claude.log"
 ok "answer fails when claude agents fails, without resuming" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet answer 4 "$T/answer.txt" 2>/dev/null && ! grep -q -- "--resume" "$FAKE/claude.log"'
+sh "$(wt 4)" set phase=waiting_user; sh "$A" fleet wait --timeout 0 >/dev/null
+sh "$A" fleet answer 4 "$T/answer.txt" >/dev/null
+ok "a question asked again after an answer wakes the lead" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: running/waiting_user -> input/waiting_user" ]]'
+ok "status takes --fleet after the subcommand" 'sh "$A" fleet status --fleet plan --json | jq -e "length > 0" >/dev/null'
 ok "stop fails when claude agents fails" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet stop >/dev/null 2>&1'
 ok "self names the slice of its worktree" '[[ "$(sh "$(wt 2)" fleet self | jq -c "[.slug, .slice, .base]")" == '"'"'["plan",2,"fleet/plan/slice-1"]'"'"' ]]'
 ok "self fails outside a slice worktree" '! sh "$A" fleet self >/dev/null 2>&1'

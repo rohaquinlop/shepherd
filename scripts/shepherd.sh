@@ -24,8 +24,8 @@
 #   diagnose start --slug SLUG | status | end   diagnosis write-up, scratch dir, edit guard
 #   propose start --slug SLUG | status | end    proposal write-up, scratch dir, same edit guard
 #   fleet start PROPOSAL [--max N]     start a session per ready slice, each in its own worktree
-#   fleet [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | base N BRANCH
-#                                      | stop | lead PHASE
+#   fleet status [--json] | wait [--timeout S] | next | answer N FILE | base N BRANCH | stop
+#                                      | lead PHASE; with several fleets, add --fleet SLUG after the subcommand
 #   fleet self                         this worktree's slice: slug, slice, base, target
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
