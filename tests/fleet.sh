@@ -15,7 +15,7 @@ if [[ "\$1" == agents ]]; then
   [[ "\$*" == *--all* ]] && { cat "$FAKE/agents.json"; exit 0; }
   jq '[.[] | select(.state != "stopped")]' "$FAKE/agents.json"; exit 0
 fi
-[[ -n "\${FAKE_FAIL_BG:-}" && "\$1" == --bg ]] && exit 1
+[[ -n "\${FAKE_FAIL_BG:-}" && "\$1 \$2" == "--bg -n" ]] && exit 1
 printf '%s\t%s\n' "\$PWD" "\$*" >> "$FAKE/claude.log"
 if [[ "\$1 \$2" == "--bg -n" ]]; then
   [[ -n "\${FAKE_NO_JOB:-}" ]] && { echo "Starting background service…"; exit 0; }
@@ -65,7 +65,7 @@ order() { sh "$A" fleet status --json | jq -c '[.[].slice]'; }
 out=$(sh "$A" fleet start "$P" --max 3)
 ok "start dispatches free slices only" '[[ "$(cut -f2 "$FAKE/claude.log" | grep -o "#slice-[0-9]" | xargs)" == "#slice-1 #slice-4" ]]'
 ok "session runs in its worktree" 'grep -q "^$(wt 1)	--bg -n shepherd-plan-slice-1 /shepherd:run $P#slice-1$" "$FAKE/claude.log"'
-ok "record holds the id claude gave the job" '[[ "$(sess 1)" == "$(jq -r ".[] | select(.name == \"shepherd-plan-slice-1\") | .sessionId" "$FAKE/agents.json")" && "$(sh "$A" fleet status --json | jq -r ".[] | select(.slice == 1) | .category")" == running ]]'
+ok "record holds the real session id" '[[ "$(sess 1)" == "$(jq -r ".[] | select(.name == \"shepherd-plan-slice-1\") | .sessionId" "$FAKE/agents.json")" && "$(sh "$A" fleet status --json | jq -r ".[] | select(.slice == 1) | .category")" == running ]]'
 ok "record maps slice to branch, worktree, session" '[[ "$(jq -r ".slices[\"1\"] | [.base, .branch] | join(\" \")" "$rec")" == "main fleet/plan/slice-1" && -d "$(wt 1)" && -n "$(sess 4)" ]]'
 ok "parses depends and every backticked file" '[[ "$(jq -c "[.slices[\"2\"].depends, .slices[\"4\"].files]" "$rec")" == '"'"'[[1],["c.sh","d.sh"]]'"'"' ]]'
 ok "overlap and unmet dependency stay pending" '[[ "$(jq -r ".slices[\"2\"].session, .slices[\"3\"].session" "$rec" | xargs)" == "null null" ]]'
@@ -168,10 +168,9 @@ ok "failed session start leaves no worktree or branch" '! FAKE_FAIL_BG=1 sh "$C"
 git -C "$C" switch -q -c feat/t
 ok "init --target sets the PR base" '[[ "$(jq -r .target_branch "$(sh "$C" init --target fleet/plan/slice-1)/state.json")" == fleet/plan/slice-1 ]]'
 git -C "$C" switch -q main
-ok "no job within the timeout leaves no record, worktree, or branch" '! FAKE_NO_JOB=1 sh "$C" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"1\"].session" "$C/.git/shepherd/_fleet/one.json")" == null && $(git -C "$C" worktree list | wc -l) -eq 1 && -z "$(git -C "$C" branch --list "fleet/*")" ]]'
 echo '[{"sessionId":"stale","name":"shepherd-one-slice-1","startedAt":1,"state":"done"}]' > "$FAKE/agents.json"
+ok "no new job within the timeout leaves no record, worktree, or branch" '! FAKE_NO_JOB=1 sh "$C" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"1\"].session" "$C/.git/shepherd/_fleet/one.json")" == null && $(git -C "$C" worktree list | wc -l) -eq 1 && -z "$(git -C "$C" branch --list "fleet/*")" ]]'
 ok "next succeeds after a failed start" 'sh "$C" fleet next | grep -q "dispatched slice-1"'
-ok "an older job with the same name is not taken" '[[ "$(jq -r ".slices[\"1\"].session" "$C/.git/shepherd/_fleet/one.json")" != stale ]]'
 
 echo "pass=$pass fail=$fail"; rm -rf "$T"
 (( fail == 0 ))

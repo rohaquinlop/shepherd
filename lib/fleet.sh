@@ -174,7 +174,7 @@ fleet_dispatch() {
       || echo "shepherd: set .slices[\"$n\"].base, .branch, .worktree, and .session to null in $record, or slice-$n never starts" >&2
     git worktree remove --force "$wt"
     git branch -D -q "$branch"
-    die "cannot start the session for slice-$n"
+    die "cannot start the session for slice-$n; if a job named $name shows up later, stop it"
   fi
   fleet_write "$record" --arg n "$n" --arg session "$session" '.slices[$n].session = $session' \
     || die "slice-$n runs as session $session; set .slices[\"$n\"].session to it in $record"
