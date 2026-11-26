@@ -513,7 +513,8 @@ guarded_session() {
       cat "$file"
       ;;
     end)
-      [[ "$active_kind" == "$noun" ]] || die "no active $noun"
+      [[ -z "$active_kind" ]] && die "no active $noun"
+      [[ "$active_kind" == "$noun" ]] || die "no active $noun ($active_kind '$(jq -r .slug "$file")' is active)"
       writeup=$(jq -r .writeup "$file")
       rm -f "$file"
       echo "ended; write-up: $writeup"

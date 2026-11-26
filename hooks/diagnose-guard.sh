@@ -26,12 +26,12 @@ writeup=$(jq -r .writeup "$active")
 scratch=$(jq -r .scratch "$active")
 kind=$(jq -r '.kind // "diagnosis"' "$active")
 docs=$(jq -r --arg d "$root/docs/diagnoses" '.docs_dir // $d' "$active")
-skill=diagnose
-[[ "$kind" == proposal ]] && skill=propose
+skill=diagnose label=Diagnosis verb=fix
+[[ "$kind" == proposal ]] && { skill=propose label=Proposal verb=implement; }
 tool=$(jq -r '.tool_name // empty' <<<"$input")
 
 deny() {
-  jq -n --arg r "shepherd $skill: $1 The $kind '$(jq -r .slug "$active")' is active: read-only. Put probes in $scratch. To implement, run \`shepherd $skill end\` and start /shepherd:run $writeup in a new session." \
+  jq -n --arg r "shepherd $skill: $1 $label '$(jq -r .slug "$active")' is active: $skill only. Put probes in $scratch. To $verb, run \`shepherd $skill end\` and start /shepherd:run $writeup in a new session." \
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
   exit 0
 }

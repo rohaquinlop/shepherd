@@ -37,8 +37,14 @@ ok "proposal guard allows scratch" '[[ -z "$(guard "$T/a" "$scr/spike.sh")" ]]'
 ok "proposal guard denies src" 'guard "$T/a" "$T/a/src.c" | grep -q "shepherd propose:.*proposal"'
 ok "proposal guard denies docs/diagnoses" 'guard "$T/a" "$T/a/docs/diagnoses/x.md" | grep -q deny'
 ok "diagnose end refused for a proposal" '! sh "$T/a" diagnose end 2>/dev/null'
+ok "diagnose start refused while proposal active" '! sh "$T/a" diagnose start --slug other 2>/dev/null'
 sh "$T/a" propose end >/dev/null
 ok "proposal ended" '[[ ! -e "$T/a/.git/shepherd/_diagnose/active.json" && -f "$w" ]]'
+jq -n --arg s "$scr" '{slug:"old", writeup:"w", scratch:$s}' > "$T/a/.git/shepherd/_diagnose/active.json"
+ok "kindless active.json is a diagnosis" 'sh "$T/a" propose status | grep -q "diagnosis .old. is active"'
+ok "kindless guard allows docs/diagnoses" '[[ -z "$(guard "$T/a" "$T/a/docs/diagnoses/x.md")" ]]'
+ok "kindless guard denies docs/proposals" 'guard "$T/a" "$T/a/docs/proposals/x.md" | grep -q "Diagnosis .old. is active: diagnose only"'
+rm "$T/a/.git/shepherd/_diagnose/active.json"
 
 # 3. legacy migration
 mkrepo "$T/b"; git -C "$T/b" switch -q -c fix/y
