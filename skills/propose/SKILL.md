@@ -72,11 +72,12 @@ Decide yourself whenever the rules, the code, the evidence, or this session sett
 
 Split the recommendation into **slices**. Each slice:
 
-- is one reviewable PR, with its scope, out of scope, and files;
+- is one reviewable PR, with its scope and out of scope;
+- lists every file it changes or adds on a `- **Files:**` line, each in backticks, so `shepherd fleet` never runs two slices on the same file at once;
 - names the slices it depends on, so slices with no dependency between them can run in parallel;
 - has acceptance criteria, each with the test that fails today and passes after.
 
-Heading format is fixed so `/shepherd:run <write-up>#slice-N` can find it: `### slice-N: <title>`.
+Heading format is fixed so `/shepherd:run <write-up>#slice-N` and `shepherd fleet` can find it: `### slice-N: <title>`, then `- **Depends on:** none` or `slice-N, …`, then `- **Files:**`.
 
 ## 8. Finish
 

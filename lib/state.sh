@@ -28,6 +28,13 @@ shepherd_root() { git rev-parse --show-toplevel 2>/dev/null; }
 
 shepherd_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null; }
 
+shepherd_common_base() {
+  local gitdir
+  gitdir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  [[ -n "$gitdir" ]] || return 1
+  printf '%s/shepherd' "$gitdir"
+}
+
 shepherd_base() {
   local gitdir
   gitdir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) || return 1

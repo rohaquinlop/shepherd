@@ -57,7 +57,8 @@ Not feasible: the refuted assumption or the rule it breaks, and what would make 
 
 ### slice-1: <title>
 
-- **Depends on:** <none | slice-N>
+- **Depends on:** <none | slice-N, slice-M>
+- **Files:** <`path`, `path` (new)>
 - **Scope:** <what changes, and the files>
 - **Out of scope:** <what does not>
 
