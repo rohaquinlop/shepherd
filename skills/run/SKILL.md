@@ -15,7 +15,7 @@ commands, and a variable holding `bash <path>` breaks in zsh). Run it from the r
 "The state dir" means the path `$SHEPHERD dir` prints. Usage:
 
 ```
-init [--issue N] [--pr N] [--jira KEY] [--url URL]
+init [--issue N] [--pr N] [--jira KEY] [--url URL] [--target BRANCH]
 dir | status | get KEY | set KEY=VALUE | set KEY:=JSON ...
 branch-name --summary TEXT [--ref REF] [--type fix|feat|docs|refactor] [--apply]
 decision --title TEXT --decision TEXT --why TEXT [--source URL]
@@ -86,11 +86,14 @@ Before every phase change, run `$SHEPHERD set phase=<phase>`.
   - Proposal write-up (a path under `docs/proposals/`, optionally ending in `#slice-N`) → read it.
     Its verdict must be `feasible` or `feasible with conditions`; otherwise stop and report the
     verdict. With `#slice-N`, the source is the `### slice-N:` section plus the proposal's rules,
-    impact map, decisions, and recommendation; check that every slice it depends on is done (its
-    acceptance tests exist and pass on the target branch), else stop and name the missing slice. Without an anchor, the source is every
-    slice. Its acceptance criteria are the starting brief, and its decisions are settled: record
-    them with `$SHEPHERD decision` instead of asking again. Copy it to `source.md`, and use the
-    ticket it names, if any, as `--issue` or `--jira`.
+    impact map, decisions, and recommendation. If `$SHEPHERD fleet self` succeeds, this worktree is
+    a fleet slice: the fleet already checked its dependencies, and its `base` (a dependency's
+    branch for a stacked slice, else the target branch) goes to `init --target`, so reviews and the
+    PR use it. Otherwise check that every slice it depends on is done (its acceptance tests exist
+    and pass on the target branch), else stop and name the missing slice. Without an anchor, the
+    source is every slice. Its acceptance criteria are the starting brief, and its decisions are
+    settled: record them with `$SHEPHERD decision` instead of asking again. Copy it to
+    `source.md`, and use the ticket it names, if any, as `--issue` or `--jira`.
   - GitHub issue (a number, `#N`, or a github.com issue URL) →
     `gh issue view <N> --json title,body,comments,labels,state`
   - GitHub PR → `gh pr view <N> --json title,body,headRefName,comments,reviews`, check out its
@@ -110,7 +113,7 @@ Before every phase change, run `$SHEPHERD set phase=<phase>`.
     for a new worktree, it renames it.
   - On any other branch, it keeps it.
 - Init with the source: `$SHEPHERD init --issue N`, `--pr N`, or `--jira KEY`, plus `--url <link>`
-  when there is one. Free text needs no flag.
+  when there is one, and `--target <base>` for a fleet slice. Free text needs no flag.
 - For Jira and pasted sources, write the story to `source.md` in the state dir: title, description,
   acceptance criteria, and comments, verbatim. The review bundle reads it. GitHub issues are
   re-fetched live instead.
@@ -306,7 +309,8 @@ waiting on a person:
 
 ## Interrupts
 
-Stop for the user only for these. Before asking, `$SHEPHERD set phase=waiting_user`, record the
+Stop for the user only for these. Before asking, `$SHEPHERD set phase=waiting_user question="<the
+question in one line>"` (a fleet lead reads it to settle or forward the question), record the
 context with `$SHEPHERD decision`, and ask **one** structured question with options and your
 recommendation (use the harness's question tool when there is one). Say in the question what you
 checked and why none of it settles the choice. The recommendation follows the rule in *Decide by
@@ -318,8 +322,9 @@ default*. If a notification tool is available, send one too.
 - Missing access: credentials, VPN, a required secret. Give the exact command the user must run.
 - The verify call still has findings on the last round's fixes.
 
-When the user answers, record the answer with `$SHEPHERD decision` and continue from the phase you
-were in.
+When the user answers, record the answer with `$SHEPHERD decision`, run
+`$SHEPHERD set question:=null`, and continue from the phase you were in. In a fleet slice the
+answer may come from the lead instead of the user; treat it the same way.
 
 ## Never
 
