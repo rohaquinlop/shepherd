@@ -4,8 +4,10 @@
 # instead of starting over. Silent otherwise.
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/fleet.sh"
 
 command -v jq >/dev/null || exit 0
+cli="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/shepherd.sh"
 
 input=$(cat)
 cwd=$(jq -r '.cwd // empty' <<<"$input")
@@ -19,6 +21,11 @@ if shepherd_diagnose_active; then
   skill=diagnose
   [[ "$kind" == proposal ]] && skill=propose
   context="A shepherd ${kind} is active in this worktree (write-up: ${writeup}). Edits outside the write-up and its scratch dir are blocked. Resume it with the shepherd:${skill} skill; read the write-up first.
+"
+fi
+
+if lead=$(fleet_lead_record "$(jq -r '.session_id // empty' <<<"$input")"); then
+  context+="A shepherd lead is active in this checkout for fleet '$(jq -r .slug "$lead")' (phase: $(jq -r .lead.phase "$lead")). Resume it with the shepherd:lead skill: read $(jq -r .proposal "$lead"), then run \`$cli fleet status --fleet $(jq -r .slug "$lead")\`.
 "
 fi
 

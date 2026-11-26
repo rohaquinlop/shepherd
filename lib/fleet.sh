@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fleet: run a proposal's slices as parallel shepherd:run sessions, one per
-# git worktree. Sourced by scripts/shepherd.sh after lib/state.sh.
+# git worktree. Sourced after lib/state.sh by scripts/shepherd.sh and the hooks.
 #
 # The record lives in the common git dir, so every worktree sees the same one:
 #   shepherd/_fleet/<slug>.json        slices: title, depends, files, base, branch, worktree, session
@@ -14,6 +14,19 @@
 FLEET_RANK='{"ready":0,"input":1,"stalled":2,"running":3,"pending":4,"merged":5}'
 
 fleet_dir() { printf '%s/_fleet' "$(shepherd_common_base)"; }
+
+# Applies a jq filter to a record under a lock: the background `fleet wait`
+# writes `.seen` while the lead writes `.lead`, so an unlocked write can drop
+# the other one.
+fleet_write() {
+  local record="$1" tmp rc=1
+  shift
+  shepherd_lock "$record.lock" 2>/dev/null || { echo "shepherd: fleet record $record is locked by another write" >&2; return 1; }
+  tmp=$(mktemp "$record.XXXXXX") && jq "$@" "$record" >"$tmp" && mv "$tmp" "$record" && rc=0
+  (( rc == 0 )) || rm -f "$tmp"
+  rm -rf "$record.lock"
+  return "$rc"
+}
 
 fleet_record() {
   local slug="$1" dir files
@@ -99,7 +112,7 @@ fleet_rows() {
          else "running" end) as $cat
       | . + [{slice: ($n | tonumber), title: $s.title, category: $cat, rank: $rank[$cat],
               phase: $phase, pr: ($state.pr // null), question: ($state.question // null),
-              branch: (if $branch == "" then $s.branch else $branch end), base: $s.base,
+              branch: (if $branch == "" then $s.branch else $branch end), base: $s.base, target: $rec[0].target,
               session: $s.session, agent: ($a.state // null), depends: $s.depends, files: $s.files}]
       ' <<<"$rows")
   done
@@ -132,20 +145,51 @@ fleet_dispatch() {
   git rev-parse --verify -q "origin/$base" >/dev/null && ref="origin/$base"
   git worktree add -q -b "$branch" "$wt" "$ref" || die "cannot create worktree for slice-$n"
   session=$(uuidgen | tr '[:upper:]' '[:lower:]')
+  # Recorded before the start, so the session's own `fleet self` finds it.
+  if ! fleet_write "$record" --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$session" \
+    '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}'; then
+    git worktree remove --force "$wt"
+    git branch -D -q "$branch"
+    die "cannot write the fleet record"
+  fi
   if ! (cd "$wt" && claude --bg -n "shepherd-$slug-slice-$n" --session-id "$session" "/shepherd:run $proposal#slice-$n" >/dev/null); then
+    fleet_write "$record" --arg n "$n" '.slices[$n] += {base: null, branch: null, worktree: null, session: null}' \
+      || echo "shepherd: set .slices[\"$n\"].base, .branch, .worktree, and .session to null in $record, or slice-$n never starts" >&2
     git worktree remove --force "$wt"
     git branch -D -q "$branch"
     die "cannot start the session for slice-$n"
   fi
-  jq --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$session" \
-    '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}' "$record" >"$record.tmp" \
-    && mv "$record.tmp" "$record" \
-    || die "slice-$n started as session ${session:0:8}, but the record was not updated; stop it with \`claude stop ${session:0:8}\`"
   echo "dispatched slice-$n on $base ($wt)"
+}
+
+fleet_slices() {
+  fleet_parse "$1" | jq -Rn '
+    [inputs | split("\t") | {key: .[0], value: {
+      title: .[1],
+      depends: (if .[2] == "" then [] else (.[2] | split(",") | map(tonumber)) end),
+      files: (if .[3] == "" then [] else (.[3] | split(",")) end),
+      base: null, branch: null, worktree: null, session: null}}] | from_entries'
+}
+
+fleet_missing() {
+  jq -r '(keys) as $k | [.[].depends[] | tostring | select(. as $d | $k | index($d) | not)] | unique | map("slice-" + .) | join(", ")' <<<"$1"
+}
+
+# A started slice stays as recorded: its session has already read the proposal.
+fleet_sync() {
+  local record="$1" proposal slices missing merge
+  proposal=$(jq -r .proposal "$record")
+  [[ -f "$proposal" ]] || die "proposal $proposal is gone"
+  slices=$(fleet_slices "$proposal")
+  merge='$s + .slices | with_entries(if .value.session == null and $s[.key] != null then .value = $s[.key] else . end)'
+  missing=$(fleet_missing "$(jq --argjson s "$slices" "$merge" "$record")")
+  [[ -z "$missing" ]] || die "unknown dependency: $missing"
+  fleet_write "$record" --argjson s "$slices" ".slices = ($merge)" || die "cannot write the fleet record"
 }
 
 fleet_next() {
   local record="$1" max target rows n base active dispatched=0
+  fleet_sync "$record"
   max=$(jq -r '.max // 3' "$record")
   target=$(jq -r .target "$record")
   git fetch -q origin 2>/dev/null
@@ -166,7 +210,7 @@ fleet_next() {
 }
 
 fleet_start() {
-  local proposal="$1" max=3 slug record dir parsed missing
+  local proposal="$1" max=3 slug record dir slices missing
   shift
   [[ "$1" == "--max" && -n "$2" ]] && max="$2"
   [[ -f "$proposal" ]] || die "fleet start <proposal> [--max N]"
@@ -175,21 +219,15 @@ fleet_start() {
   dir=$(fleet_dir)
   record="$dir/$slug.json"
   [[ -f "$record" ]] && die "fleet '$slug' already started; use \`shepherd fleet next\`"
-  parsed=$(fleet_parse "$proposal")
-  [[ -n "$parsed" ]] || die "no \`### slice-N:\` sections in $proposal"
+  slices=$(fleet_slices "$proposal")
+  [[ "$slices" != "{}" ]] || die "no \`### slice-N:\` sections in $proposal"
+  missing=$(fleet_missing "$slices")
+  [[ -z "$missing" ]] || die "unknown dependency: $missing"
   mkdir -p "$dir/worktrees"
-  jq -Rn --arg slug "$slug" --arg proposal "$proposal" --arg target "$(shepherd_target_branch)" \
-    --argjson max "$max" --arg now "$(shepherd_now)" '
-    {slug: $slug, proposal: $proposal, target: $target, max: $max, created: $now,
-     slices: ([inputs | split("\t") | {key: .[0], value: {
-       title: .[1],
-       depends: (if .[2] == "" then [] else (.[2] | split(",") | map(tonumber)) end),
-       files: (if .[3] == "" then [] else (.[3] | split(",")) end),
-       base: null, branch: null, worktree: null, session: null}}] | from_entries)}
-  ' <<<"$parsed" >"$record.tmp" || die "cannot write the fleet record"
-  missing=$(jq -r '(.slices | keys) as $k | [.slices[].depends[] | tostring | select(. as $d | $k | index($d) | not)] | unique | map("slice-" + .) | join(", ")' "$record.tmp")
-  [[ -z "$missing" ]] || { rm -f "$record.tmp"; die "unknown dependency: $missing"; }
-  mv "$record.tmp" "$record"
+  jq -n --arg slug "$slug" --arg proposal "$proposal" --arg target "$(shepherd_target_branch)" \
+    --argjson max "$max" --arg now "$(shepherd_now)" --argjson slices "$slices" \
+    '{slug: $slug, proposal: $proposal, target: $target, max: $max, created: $now, slices: $slices}' \
+    >"$record.tmp" && mv "$record.tmp" "$record" || die "cannot write the fleet record"
   fleet_next "$record"
 }
 
@@ -204,21 +242,43 @@ fleet_status() {
     (if .pr then "#" + (.pr | tostring) else "-" end), (.branch // "-"), (.question // "")] | @tsv' <<<"$rows"
 }
 
+# Compares against the snapshot the last wait saw (`.seen` in the record), so a
+# change made while the lead was busy between two waits is still reported. The
+# first wait compares against nothing, so it reports a slice already waiting.
 fleet_wait() {
-  local record="$1" timeout="${2:-1800}" interval="${SHEPHERD_FLEET_INTERVAL:-30}" start now now_rows changed
-  snapshot() { local rows; rows=$(fleet_rows "$record") || exit 1; jq -c 'map({slice, category, phase, pr}) | sort_by(.slice)' <<<"$rows"; }
-  start=$(snapshot) || exit 1
+  local record="$1" timeout="${2:-1800}" interval="${SHEPHERD_FLEET_INTERVAL:-30}" seen now now_rows changed
+  snapshot() { local rows; rows=$(fleet_rows "$record") || exit 1; jq -c 'map({slice, category, phase, pr, question}) | sort_by(.slice)' <<<"$rows"; }
+  seen=$(jq -c '.seen // []' "$record")
   now=$SECONDS
-  while (( SECONDS - now < timeout )); do
-    sleep "$interval"
+  while :; do
     now_rows=$(snapshot) || exit 1
-    changed=$(jq -rn --argjson a "$start" --argjson b "$now_rows" '
-      [$b[] as $r | ($a[] | select(.slice == $r.slice)) as $o | select($o != $r)
+    changed=$(jq -rn --argjson a "$seen" --argjson b "$now_rows" '
+      [$b[] as $r | (first($a[] | select(.slice == $r.slice)) // {category: "new"}) as $o | select($o != $r)
        | "slice-\($r.slice): \($o.category)/\($o.phase // "-") -> \($r.category)/\($r.phase // "-")"] | .[]')
-    [[ -n "$changed" ]] && { echo "$changed"; return 0; }
+    if [[ -n "$changed" ]]; then
+      seen=$now_rows
+      fleet_save_seen "$record" "$seen"
+      # The lead's own dispatches, answers, and re-plans move a slice from
+      # new, pending, input, or ready to running or pending; those do not wake it.
+      changed=$(grep -Ev '^slice-[0-9]+: (new|pending|input|ready)/[^ ]* -> (running|pending)/' <<<"$changed")
+      [[ -n "$changed" ]] && { echo "$changed"; return 0; }
+    fi
+    (( SECONDS - now < timeout )) || break
+    sleep "$interval"
   done
   echo "no fleet change after ${timeout}s"
   exit 3
+}
+
+fleet_save_seen() {
+  fleet_write "$1" --argjson seen "$2" '.seen = $seen' || die "cannot write the fleet record"
+}
+
+fleet_set_base() {
+  local record="$1" n="$2" base="$3"
+  [[ -n "$n" && -n "$base" ]] || die "fleet base <slice> <branch>"
+  jq -e --arg n "$n" '.slices[$n].session != null' "$record" >/dev/null || die "slice-$n has not started"
+  fleet_write "$record" --arg n "$n" --arg base "$base" '.slices[$n].base = $base' || die "cannot write the fleet record"
 }
 
 fleet_answer() {
@@ -243,13 +303,46 @@ fleet_stop() {
   done
 }
 
+fleet_find() {
+  local filter="$1" root file
+  shift
+  root=$(shepherd_root) || return 1
+  for file in "$(fleet_dir)"/*.json; do
+    [[ -f "$file" ]] || continue
+    jq -e --arg r "$root" "$@" "$filter" "$file" >/dev/null && { printf '%s' "$file"; return 0; }
+  done
+  return 1
+}
+
+fleet_lead_record() { fleet_find '.lead.root == $r and .lead.phase != "done" and .lead.session == $s' --arg s "$1"; }
+
+fleet_lead() {
+  local record="$1" phase="$2"
+  shepherd_in_list "$phase" "$SHEPHERD_LEAD_ACTIVE_PHASES $SHEPHERD_LEAD_WAIT_PHASES" \
+    || die "fleet lead <$SHEPHERD_LEAD_ACTIVE_PHASES $SHEPHERD_LEAD_WAIT_PHASES>"
+  [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]] || die "fleet lead runs only in a Claude Code session (CLAUDE_CODE_SESSION_ID is not set)"
+  fleet_write "$record" --arg phase "$phase" --arg root "$(shepherd_root)" --arg now "$(shepherd_now)" \
+    --arg session "$CLAUDE_CODE_SESSION_ID" \
+    '.lead = {phase: $phase, root: $root, session: $session, stop_blocks: 0, updated_at: $now}' || die "cannot write the fleet record"
+}
+
+fleet_self() {
+  local file
+  file=$(fleet_find 'any(.slices[]; .worktree == $r)') || die "this worktree is not a fleet slice"
+  jq --arg r "$(shepherd_root)" '
+    . as $f | .slices | to_entries[] | select(.value.worktree == $r)
+    | {slug: $f.slug, slice: (.key | tonumber), base: .value.base, target: $f.target}
+  ' "$file"
+}
+
 cmd_fleet() {
   local sub="$1" slug="" record
   shift
   [[ "$sub" == start ]] && { fleet_start "$@"; return; }
+  [[ "$sub" == self ]] && { fleet_self; return; }
   if [[ "$1" == "--fleet" ]]; then slug="$2"; shift 2; fi
   case "$sub" in
-    status|wait|next|answer|stop) record=$(fleet_record "$slug") || exit 1 ;;
+    status|wait|next|answer|stop|lead|base) record=$(fleet_record "$slug") || exit 1 ;;
   esac
   case "$sub" in
     status) fleet_status "$record" "$1" ;;
@@ -257,6 +350,8 @@ cmd_fleet() {
     next) fleet_next "$record" ;;
     answer) fleet_answer "$record" "$@" ;;
     stop) fleet_stop "$record" ;;
-    *) die "fleet start <proposal> [--max N] | [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | stop" ;;
+    lead) fleet_lead "$record" "$1" ;;
+    base) fleet_set_base "$record" "$@" ;;
+    *) die "fleet start <proposal> [--max N] | status [--json] | wait [--timeout S] | next | answer N FILE | base N BRANCH | stop | lead PHASE (each takes --fleet SLUG after it) | self" ;;
   esac
 }

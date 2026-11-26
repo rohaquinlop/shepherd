@@ -2,7 +2,7 @@
 # shepherd fleet on a throwaway repo, with fake `claude` and `gh` on PATH.
 # usage: bash tests/fleet.sh [shepherd checkout]   (default: this checkout)
 set -u
-REPO="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"; CLI="$REPO/scripts/shepherd.sh"
+REPO="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"; CLI="$REPO/scripts/shepherd.sh"; HOOKS="$REPO/hooks"
 T=$(cd "$(mktemp -d)" && pwd -P); pass=0; fail=0
 ok() { if eval "$2"; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }
 sh() { (cd "$1" && shift && bash "$CLI" "$@"); }
@@ -24,7 +24,7 @@ cat > "$FAKE/bin/gh" <<EOF
 exit 1
 EOF
 chmod +x "$FAKE/bin/claude" "$FAKE/bin/gh"
-export PATH="$FAKE/bin:$PATH" SHEPHERD_FLEET_INTERVAL=1
+export PATH="$FAKE/bin:$PATH" SHEPHERD_FLEET_INTERVAL=1 CLAUDE_CODE_SESSION_ID=lead-1
 
 A="$T/a"; git init -q -b main "$A"; git -C "$A" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 P="$T/plan.md"
@@ -53,6 +53,7 @@ wt() { jq -r --arg n "$1" '.slices[$n].worktree' "$rec"; }
 sess() { jq -r --arg n "$1" '.slices[$n].session' "$rec"; }
 agents() { jq -n --argjson s "$1" '[$s | to_entries[] | {sessionId: .key, state: .value, status: "idle"}]' > "$FAKE/agents.json"; }
 state() { local w; w=$(wt "$1"); shift; sh "$w" init >/dev/null; sh "$w" set "$@"; }
+plan_sed() { sed -i.bak "$1" "$P" && rm "$P.bak"; }
 order() { sh "$A" fleet status --json | jq -c '[.[].slice]'; }
 
 out=$(sh "$A" fleet start "$P" --max 3)
@@ -72,15 +73,41 @@ ok "overlap with an unmerged slice still waits" '[[ "$(jq -r ".slices[\"3\"].ses
 agents "{\"$(sess 1)\":\"done\",\"$(sess 4)\":\"done\",\"$(sess 2)\":\"blocked\"}"
 state 4 phase=waiting_user question=which
 ok "status ranks ready, input, stalled, pending" '[[ "$(order)" == "[1,4,2,3]" ]]'
+ok "status rows carry the fleet target" '[[ "$(sh "$A" fleet status --json | jq -r "[.[].target] | unique | join(\",\")")" == main ]]'
 ok "status shows the question" '[[ "$(sh "$A" fleet status --json | jq -r ".[] | select(.slice == 4) | .question")" == which ]]'
 
-(sleep 2; sh "$(wt 4)" set phase=implement) &
-w=$(sh "$A" fleet wait --timeout 10); wait
-ok "wait reports the change" '[[ "$w" == "slice-4: input/waiting_user -> running/implement" ]]'
+ok "the first wait reports a slice already waiting" '[[ "$(sh "$A" fleet wait --timeout 0)" == *"slice-4: new/- -> input/waiting_user"* ]]'
+(sleep 1; sh "$(wt 4)" set phase=implement) &
+w=$(sh "$A" fleet wait --timeout 3); wait
+ok "wait stays quiet when a slice goes back to running" '[[ "$w" == "no fleet change after 3s" ]]'
 
+sh "$(wt 4)" set phase=waiting_user
+ok "a change between two waits is reported at once" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: running/implement -> input/waiting_user" ]]'
+ok "an unchanged fleet times out" '! sh "$A" fleet wait --timeout 0 >/dev/null'
+sh "$(wt 4)" set phase=implement; sh "$A" fleet wait --timeout 0 >/dev/null
+sh "$(wt 4)" set phase=waiting_ci
+ok "a phase change inside running is reported" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: running/implement -> running/waiting_ci" ]]'
+sh "$(wt 4)" set phase=implement; sh "$A" fleet wait --timeout 0 >/dev/null
 echo MERGED > "$FAKE/pr-11"
 sh "$A" fleet next >/dev/null
 ok "next starts a slice once the overlap merged" '[[ "$(jq -r ".slices[\"3\"].base" "$rec")" == main ]]'
+agents "{\"$(sess 1)\":\"done\",\"$(sess 4)\":\"done\",\"$(sess 2)\":\"blocked\",\"$(sess 3)\":\"busy\"}"
+ok "wait skips the lead's own dispatch" '[[ "$(sh "$A" fleet wait --timeout 0)" != *slice-3* ]]'
+printf '### slice-5: added\n- **Depends on:** slice-3\n- **Files:** `e.sh`\n' >> "$P"
+sh "$A" fleet next >/dev/null
+ok "next adds a slice appended by a re-plan" '[[ "$(jq -c ".slices[\"5\"] | [.title, .depends]" "$rec")" == '"'"'["added",[3]]'"'"' && "$(jq -r ".slices[\"3\"].session" "$rec")" != null ]]'
+plan_sed 's/^### slice-5: added$/### slice-5: renamed/'
+sh "$A" fleet next >/dev/null
+ok "next takes an edit to a slice that has not started" '[[ "$(jq -r ".slices[\"5\"].title" "$rec")" == renamed ]]'
+plan_sed 's/^- \*\*Depends on:\*\* slice-3$/- **Depends on:** slice-3, slice-9/'
+ok "next refuses an edit to an unknown dependency" '! sh "$A" fleet next 2>/dev/null && [[ "$(jq -c ".slices[\"5\"].depends" "$rec")" == "[3]" ]]'
+plan_sed 's/^- \*\*Depends on:\*\* slice-3, slice-9$/- **Depends on:** slice-3/'
+printf '### slice-6: bad\n- **Depends on:** slice-9\n- **Files:** `f.sh`\n' >> "$P"
+ok "next refuses a re-plan with an unknown dependency" '! sh "$A" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"6\"]" "$rec")" == null ]]'
+plan_sed '/^### slice-6/,$d'
+mv "$P" "$P.away"
+ok "next fails when the proposal is gone" '! sh "$A" fleet next 2>/dev/null'
+mv "$P.away" "$P"
 
 echo "use option b" > "$T/answer.txt"
 : > "$FAKE/claude.log"
@@ -88,7 +115,39 @@ sh "$A" fleet answer 4 "$T/answer.txt" >/dev/null
 ok "answer stops, then resumes in the worktree" '[[ "$(cut -f2 "$FAKE/claude.log" | head -1)" == "stop $(sess 4 | cut -c1-8)" ]] && grep -q "^$(wt 4)	--bg --resume $(sess 4) use option b$" "$FAKE/claude.log"'
 : > "$FAKE/claude.log"
 ok "answer fails when claude agents fails, without resuming" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet answer 4 "$T/answer.txt" 2>/dev/null && ! grep -q -- "--resume" "$FAKE/claude.log"'
+sh "$(wt 4)" set phase=waiting_user; sh "$A" fleet wait --timeout 0 >/dev/null
+sh "$A" fleet answer 4 "$T/answer.txt" >/dev/null
+ok "the answered question stays quiet" '! sh "$A" fleet wait --timeout 0 >/dev/null'
+sh "$(wt 4)" set question=again
+ok "a new question after an answer wakes the lead" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: input/waiting_user -> input/waiting_user" ]]'
+ok "status takes --fleet after the subcommand" 'sh "$A" fleet status --fleet plan --json | jq -e "length > 0" >/dev/null'
 ok "stop fails when claude agents fails" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet stop >/dev/null 2>&1'
+ok "self names the slice of its worktree" '[[ "$(sh "$(wt 2)" fleet self | jq -c "[.slug, .slice, .base]")" == '"'"'["plan",2,"fleet/plan/slice-1"]'"'"' ]]'
+ok "self fails outside a slice worktree" '! sh "$A" fleet self >/dev/null 2>&1'
+sh "$A" fleet base 2 main
+ok "base records a retargeted slice" '[[ "$(jq -r ".slices[\"2\"].base" "$rec")" == main ]]'
+ok "base refuses an unknown slice" '! sh "$A" fleet base 9 main 2>/dev/null'
+hook() { jq -n --arg cwd "$1" --arg s "${3:-lead-1}" '{cwd: $cwd, session_id: $s}' | bash "$HOOKS/$2"; }
+sh "$A" fleet lead dispatching
+ok "stop hook leaves other sessions in the lead checkout alone" '[[ -z "$(hook "$A" stop.sh other)" ]]'
+ok "stop hook blocks an active lead phase" 'hook "$A" stop.sh | jq -e ".decision == \"block\" and (.reason | test(\"lead phase is .dispatching.\"))" >/dev/null'
+hook "$A" stop.sh >/dev/null; hook "$A" stop.sh >/dev/null
+ok "stop hook gives up after the cap" '[[ -z "$(hook "$A" stop.sh)" ]]'
+sh "$A" fleet lead waiting_fleet
+ok "stop hook lets waiting_fleet end the turn" '[[ -z "$(hook "$A" stop.sh)" ]]'
+sh "$A" fleet lead dispatching; mkdir "$rec.lock"; echo $$ > "$rec.lock/pid"
+ok "stop hook names a locked record instead of blocking" 'hook "$A" stop.sh | jq -e ".systemMessage | test(\"locked\")" >/dev/null'
+rm -rf "$rec.lock"; sh "$A" fleet lead waiting_fleet
+ok "session start is silent for another session" '[[ -z "$(hook "$A" session-start.sh other)" ]]'
+ok "session start names the active lead" 'hook "$A" session-start.sh | jq -r .hookSpecificOutput.additionalContext | grep -q "shepherd lead is active .* fleet .plan. (phase: waiting_fleet)"'
+sh "$A" fleet lead done
+ok "a done lead is silent" '[[ -z "$(hook "$A" stop.sh)" && -z "$(hook "$A" session-start.sh)" ]]'
+ok "lead refuses an unknown phase" '! sh "$A" fleet lead planning 2>/dev/null'
+ok "lead refuses outside a Claude Code session" '! CLAUDE_CODE_SESSION_ID= sh "$A" fleet lead waiting_fleet 2>/dev/null'
+sh "$A" fleet lead waiting_fleet; sh "$A" fleet base 2 main; pids=()
+for i in 1 2 3 4 5; do sh "$A" fleet base 2 "b$i" & pids+=($!); sh "$A" fleet lead done & pids+=($!); done
+rc=0; for p in "${pids[@]}"; do wait "$p" || rc=1; done
+ok "parallel record writes keep each other" '(( rc == 0 )) && [[ "$(jq -r ".lead.phase, .slices[\"2\"].base" "$rec" | xargs)" == "done b"[1-5] && -z "$(ls "$rec".* 2>/dev/null)" ]]'
 ok "start refuses a second run" '! sh "$A" fleet start "$P" 2>/dev/null'
 
 ok "status fails without a fleet record" '(cd "$T" && git init -q -b main b) && ! out=$(sh "$T/b" fleet status 2>/dev/null) && [[ -z "$out" ]]'
@@ -99,6 +158,9 @@ printf '### slice-1: x\n- **Depends on:** slice-9\n- **Files:** `a`\n' > "$T/bad
 ok "unknown dependency refused, no record" '! sh "$C" fleet start "$T/bad.md" 2>/dev/null && [[ ! -e "$C/.git/shepherd/_fleet/bad.json" ]]'
 printf '### slice-1: x\n- **Depends on:** none\n- **Files:** `a`\n' > "$T/one.md"
 ok "failed session start leaves no worktree or branch" '! FAKE_FAIL_BG=1 sh "$C" fleet start "$T/one.md" 2>/dev/null && [[ $(git -C "$C" worktree list | wc -l) -eq 1 ]] && [[ -z "$(git -C "$C" branch --list "fleet/*")" ]]'
+git -C "$C" switch -q -c feat/t
+ok "init --target sets the PR base" '[[ "$(jq -r .target_branch "$(sh "$C" init --target fleet/plan/slice-1)/state.json")" == fleet/plan/slice-1 ]]'
+git -C "$C" switch -q main
 ok "next succeeds after a failed start" 'sh "$C" fleet next | grep -q "dispatched slice-1"'
 
 echo "pass=$pass fail=$fail"; rm -rf "$T"
