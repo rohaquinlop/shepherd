@@ -55,7 +55,9 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'while true; do gh pr merge 1; done' 'function f { git push -f origin feat/x; }; f' 'exec -a g git push -f' \
   '$(command -v git) push --no-verify origin feat/x' 'g=git; $g push --no-verify origin feat/x' \
   'GIT_CONFIG_COUNT=1 $(command -v git) push origin feat/x' 'echo $(echo ")") ; git push -f origin feat/x' \
-  "$deep" 'gh -R o/r pr merge 1' 'gh -R o/r api -X PUT repos/o/r/pulls/1/merge'; do
+  "$deep" 'gh -R o/r pr merge 1' 'gh -R o/r api -X PUT repos/o/r/pulls/1/merge' \
+  'gh api -X PUT "repos/o/r/pulls/1/merge?x=1"' "\$'gh' pr merge 1" "\$'git' push -f origin feat/x" \
+  'GIT_DIR=$(git rev-parse --git-common-dir) git push origin other:feat/x' 'git --git-dir=../r/.git push origin feat/x'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"'; do
@@ -66,6 +68,7 @@ ok "cleared push passes" 'pushes "git push -u origin feat/x"'
 ok "git gate chains to the repo pre-push" 'grep -q "^pre-push origin" "$T/repo-hook.log"'
 commit "$W" --amend --allow-empty -m b; clear_head
 ok "git rejects a rewrite of a cleared tree" '! pushes "git push --force origin feat/x"'
+ok "git rejects deleting a shepherd branch" '! pushes "git push origin :feat/x" && git -C "$T/origin.git" rev-parse -q --verify refs/heads/feat/x >/dev/null'
 
 # 3. merges
 ok "hook denies gh pr merge on line 2" 'denied $'"'"'echo ok\ngh pr merge 1'"'"''

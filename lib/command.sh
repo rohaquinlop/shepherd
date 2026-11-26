@@ -44,6 +44,9 @@ _shepherd_split() {
       fi
       i=$((i + 2)); continue
     fi
+    if [[ "$c" == '$' && "${s:i+1:1}" == [\'\"] ]]; then
+      i=$((i + 1)); continue
+    fi
     if [[ "$c" == '$' && "${s:i+1:1}" == '(' ]]; then
       j=$((i + 2)); level=1; sq=""
       while (( j < n && level > 0 )); do

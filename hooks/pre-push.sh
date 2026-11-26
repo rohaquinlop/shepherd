@@ -3,9 +3,10 @@
 # command in the call (see lib/command.sh):
 #   - deny `gh pr merge` and `gh api` merge writes: shepherd never merges
 #   - deny force pushes: they discard what reviewers already read
-#   - deny a command with a bare `push` word and a `--no-verify` or
-#     `core.hooksPath` word, or a call with such a command that names
-#     GIT_CONFIG*: they can skip the git pre-push gate (hooks/git-pre-push.sh).
+#   - deny a command with a bare `push` word and a `--no-verify`,
+#     `core.hooksPath`, `--git-dir`, or `--work-tree` word, or a call with such
+#     a command that names GIT_CONFIG*, GIT_DIR, GIT_COMMON_DIR, or
+#     GIT_WORK_TREE: they can skip the git pre-push gate (hooks/git-pre-push.sh).
 #     It needs no `git` word, so `$g push` and `$(command -v git) push` count
 #   - deny `git push` unless the worktree is clean and HEAD's tree is the tree
 #     the review gate cleared (see `shepherd clear`)
@@ -41,7 +42,7 @@ deny() {
 MERGE_REASON="never merge a shepherd PR. Set phase=done and hand the PR back to the user."
 FORCE_REASON="never force-push a shepherd branch. Push follow-up commits so earlier reviews stay valid."
 DEEP_REASON="this command nests shells or substitutions too deep to read, and it names a push or a merge. Run the push as a plain command."
-VERIFY_REASON="never skip the git pre-push gate (--no-verify, core.hooksPath). Clear the tree with the review gate, then push."
+VERIFY_REASON="never skip the git pre-push gate (--no-verify, core.hooksPath, GIT_CONFIG*, GIT_DIR, --git-dir, --work-tree). Clear the tree with the review gate, then push."
 
 is_merge() {
   [[ "${1##*/}" == gh ]] || return 1
@@ -64,7 +65,7 @@ is_merge() {
       -f | -F | --field | --raw-field | --input | -f?* | -F?* | --field=* | --raw-field=* | --input=*) fields=1 ;;
       *mergePullRequest*) return 0 ;;
     esac
-    [[ "$a" =~ (^|/)pulls/[^/]+/merge$ ]] && merge_path=1
+    [[ "${a%%\?*}" =~ (^|/)pulls/[^/]+/merge/?$ ]] && merge_path=1
     prev=$a
   done
   (( merge_path )) || return 1
@@ -103,7 +104,7 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
   if [[ "$SHEPHERD_SEP$seg$SHEPHERD_SEP" == *"${SHEPHERD_SEP}push$SHEPHERD_SEP"* ]]; then
     push_word=1
     for w in "${argv[@]}"; do
-      [[ "$w" == --no-v* || "$w" == *hookspath* ]] && bypass=1
+      [[ "$w" == --no-v* || "$w" == *hookspath* || "$w" == --git-dir* || "$w" == --work-tree* ]] && bypass=1
     done
   fi
   if is_merge "${argv[@]}"; then
@@ -113,7 +114,7 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
     [[ -n "$reason" ]] || reason=$(push_denial)
   fi
 done
-(( push_word )) && [[ "$cmd" == *git_config* ]] && bypass=1
+(( push_word )) && [[ "$cmd" == *git_config* || "$cmd" == *git_dir* || "$cmd" == *git_common_dir* || "$cmd" == *git_work_tree* ]] && bypass=1
 (( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *push* || "$cmd" == *merge* ]] && deep=1 || deep=0
 shopt -u nocasematch
 
