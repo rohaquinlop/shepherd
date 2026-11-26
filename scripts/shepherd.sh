@@ -23,8 +23,11 @@
 #   wait-review [--timeout SECONDS]    block until a new PR review or comment lands
 #   diagnose start --slug SLUG | status | end   diagnosis write-up, scratch dir, edit guard
 #   propose start --slug SLUG | status | end    proposal write-up, scratch dir, same edit guard
+#   fleet start PROPOSAL [--max N]     start a session per ready slice, each in its own worktree
+#   fleet [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | stop
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/fleet.sh"
 
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXEMPT_CLASSES="format tests comments merge reviewed-tree lockfile"
@@ -591,5 +594,6 @@ case "$sub" in
   resolve) cmd_resolve "$@" ;;
   wait-review) cmd_wait_review "$@" ;;
   diagnose|propose) guarded_session "$sub" "$@" ;;
-  *) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  fleet) cmd_fleet "$@" ;;
+  *) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
