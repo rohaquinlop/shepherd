@@ -53,7 +53,9 @@ A choice is **settled** when one of these answers it:
    decisions, a diagnosis's fix direction.
 3. `brief.md` and `decisions.md` in the state dir, including the user's earlier answers.
 4. The code: an existing helper, pattern, or convention that the repo already uses for the same job.
-5. This session: something the user said, or a check you ran.
+5. This session: something the user said, or a check you ran that directly answers this choice
+   (a measured behavior, a reproduction of the case in question). A passing test or a check of
+   something else does not settle a design choice.
 
 If two of them give different answers, the choice is not settled.
 
@@ -160,9 +162,9 @@ pre-push reviews. Nothing is committed or pushed.
 6. `$SHEPHERD policy-base remove`. If the last plan call returned `plan current`, or every finding
    left was dismissed with evidence, and every design choice in the plan is settled, record
    `$SHEPHERD decision --title "plan approved" --decision "implement plan.md" --why "<the review
-   result and what settled each choice>"` and implement. Otherwise interrupt with one question on the unsettled choice: show the
-   plan, the review result, the options, and your recommendation. Update `plan.md` with the
-   answer; do not spend another review unless budget is left.
+   result and what settled each choice>"` and implement. Otherwise interrupt with one question on
+   the unsettled choice: show the plan, the review result, the options, and your recommendation.
+   Update `plan.md` with the answer; do not spend another review unless budget is left.
 
 ## 2. Implement
 
