@@ -63,7 +63,9 @@ fleet_parse() {
 fleet_agents() { claude agents --json --all 2>/dev/null || die "\`claude agents --json\` failed"; }
 
 fleet_live() {
-  claude agents --json 2>/dev/null | jq -e --arg s "$1" 'any(.[]; .sessionId == $s)' >/dev/null
+  local agents
+  agents=$(claude agents --json 2>/dev/null) || die "\`claude agents --json\` failed"
+  jq -e --arg s "$1" 'any(.[]; .sessionId == $s)' >/dev/null <<<"$agents"
 }
 
 fleet_halt() {
@@ -137,7 +139,8 @@ fleet_dispatch() {
   fi
   jq --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$session" \
     '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}' "$record" >"$record.tmp" \
-    && mv "$record.tmp" "$record"
+    && mv "$record.tmp" "$record" \
+    || die "slice-$n started as session ${session:0:8}, but the record was not updated; stop it with \`claude stop ${session:0:8}\`"
   echo "dispatched slice-$n on $base ($wt)"
 }
 
@@ -235,7 +238,7 @@ fleet_stop() {
   local record="$1" session
   for session in $(jq -r '.slices[].session // empty' "$record"); do
     fleet_live "$session" || continue
-    fleet_halt "$session"
+    claude stop "${session:0:8}" >/dev/null 2>&1 || die "cannot stop session ${session:0:8}"
     echo "stopped ${session:0:8}"
   done
 }
