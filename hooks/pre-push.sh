@@ -19,7 +19,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/command.sh"
 input=$(cat)
 
 if ! command -v jq >/dev/null; then
-  [[ "$input" == *push* || "$input" == *merge* ]] || exit 0
+  text=${input//\\\"/}
+  [[ "$text" == *'"command"'* ]] || exit 0
+  text=${text#*\"command\"}; text=${text#*\"}; text=${text%%\"*}
+  [[ "$text" == *push* || "$text" == *merge* ]] || exit 0
   shepherd_is_active || exit 0
   echo "shepherd: jq is not installed, so the push gate cannot read this command. Install jq, then retry." >&2
   exit 2
@@ -37,14 +40,23 @@ deny() {
 
 MERGE_REASON="never merge a shepherd PR. Set phase=done and hand the PR back to the user."
 FORCE_REASON="never force-push a shepherd branch. Push follow-up commits so earlier reviews stay valid."
+DEEP_REASON="this command nests shells or substitutions too deep to read, and it names a push or a merge. Run the push as a plain command."
 VERIFY_REASON="never skip the git pre-push gate (--no-verify, core.hooksPath). Clear the tree with the review gate, then push."
 
 is_merge() {
   [[ "${1##*/}" == gh ]] || return 1
-  [[ "${2:-}" == pr && "${3:-}" == merge ]] && return 0
-  [[ "${2:-}" == api ]] || return 1
+  shift
   local a prev="" method="" fields=0 merge_path=0
-  for a in "${@:3}"; do
+  local -a pos=()
+  for a in "$@"; do
+    case "$prev" in -R | --repo) prev=""; continue ;; esac
+    [[ "$a" != -* ]] && pos+=("$a")
+    prev=$a
+  done
+  [[ "${pos[0]:-}" == pr && "${pos[1]:-}" == merge ]] && return 0
+  [[ "${pos[0]:-}" == api ]] || return 1
+  prev=""
+  for a in "$@"; do
     case "$prev" in -X | --method) method=$a ;; esac
     case "$a" in
       -X?*) method=${a#-X} ;;
@@ -102,11 +114,13 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
   fi
 done
 (( push_word )) && [[ "$cmd" == *git_config* ]] && bypass=1
+(( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *push* || "$cmd" == *merge* ]] && deep=1 || deep=0
 shopt -u nocasematch
 
-(( push || merge || bypass )) || exit 0
+(( push || merge || bypass || deep )) || exit 0
 shepherd_is_active || exit 0
 (( bypass )) && [[ -z "$reason" ]] && reason=$VERIFY_REASON
+(( deep )) && [[ -z "$reason" ]] && reason=$DEEP_REASON
 
 (( merge )) && deny "$MERGE_REASON"
 [[ -n "$reason" ]] && deny "$reason"

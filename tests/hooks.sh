@@ -45,6 +45,7 @@ ok "main worktree keeps its hooksPath" '[[ "$(git -C "$T/r" config core.hooksPat
 
 # 2. cleared tree: force, --no-verify, and hooksPath overrides still denied
 clear_head
+deep='git push origin feat/x'; for _ in 1 2 3 4 5 6; do deep="bash -c $(printf %q "$deep")"; done
 for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push -uf origin feat/x' \
   'git push origin +feat/x' 'git push --force-with-lease origin feat/x' 'git push --no-verify origin feat/x' \
   'git -c core.hooksPath=/dev/null push origin feat/x' 'GIT_CONFIG_COUNT=1 git push origin feat/x' \
@@ -53,7 +54,8 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'eval "git push --no-verify origin feat/x"' 'nohup git push -f origin feat/x' 'timeout -s KILL 5 git push -f' \
   'while true; do gh pr merge 1; done' 'function f { git push -f origin feat/x; }; f' 'exec -a g git push -f' \
   '$(command -v git) push --no-verify origin feat/x' 'g=git; $g push --no-verify origin feat/x' \
-  'GIT_CONFIG_COUNT=1 $(command -v git) push origin feat/x'; do
+  'GIT_CONFIG_COUNT=1 $(command -v git) push origin feat/x' 'echo $(echo ")") ; git push -f origin feat/x' \
+  "$deep" 'gh -R o/r pr merge 1' 'gh -R o/r api -X PUT repos/o/r/pulls/1/merge'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"'; do
@@ -76,6 +78,12 @@ nojq() { jq -n --arg c "$2" '{tool_input:{command:$c}}' | (cd "$1" && PATH="$T/b
 ok "no jq: push denied" 'nojq "$W" "git push origin feat/x"; [[ $? == 2 ]]'
 ok "no jq: other command passes" 'nojq "$W" "ls"'
 ok "no jq: push on a branch without state passes" 'nojq "$T/r" "git push origin main"'
+ok "no jq: a path naming merge does not deny ls" \
+  'jq -n "{tool_input:{command:\"ls\"}, cwd:\"/x/fix-merge\", transcript_path:\"/push\"}" | (cd "$W" && PATH="$T/bin" "$BASH" "$HOOKS/pre-push.sh")'
+
+# 4b. the pre-push stub runs a copy of the gate, not the plugin path
+GH="$T/r/.git/worktrees/wt/shepherd/_githooks"
+ok "gate copy installed, stub has no plugin path" '[[ -f "$GH/gate/hooks/git-pre-push.sh" && -f "$GH/gate/lib/state.sh" ]] && ! grep -q "$REPO" "$GH/pre-push"'
 
 # 5. other hooks chain; a branch without state passes the git gate
 : >"$T/repo-hook.log"

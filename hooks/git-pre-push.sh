@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Git pre-push gate, run by the pre-push stub `shepherd init` writes in
-# <worktree git dir>/shepherd/_githooks. Git runs it for every push from this
+# Git pre-push gate. `shepherd init` copies it, with lib/state.sh, to
+# <worktree git dir>/shepherd/_githooks/gate/, and the pre-push stub there runs
+# the copy, so a plugin update or move never leaves the stub without a gate. Git runs it for every push from this
 # worktree, whatever the command shape; only `--no-verify` skips it, and the
 # PreToolUse hook denies that. For each pushed ref whose branch (the local
 # branch, or the remote branch it updates) has shepherd state here:
@@ -20,7 +21,8 @@ state_for() {
   for b in "${lref#refs/heads/}" "${rref#refs/heads/}"; do
     [[ "$b" == HEAD ]] && b=$current
     [[ "$b" == refs/* || -z "$b" ]] && continue
-    [[ -f "$base/${b//\//__}/state.json" ]] && { printf '%s' "$base/${b//\//__}/state.json"; return 0; }
+    [[ -f "$(shepherd_branch_dir "$base" "$b")/state.json" ]] \
+      && { printf '%s/state.json' "$(shepherd_branch_dir "$base" "$b")"; return 0; }
   done
   return 1
 }

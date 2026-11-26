@@ -15,14 +15,18 @@ SHEPHERD_SPLIT_DEPTH=4
 
 shepherd_split_command() {
   SHEPHERD_SEGMENTS=()
+  SHEPHERD_SPLIT_TRUNCATED=0
   local LC_ALL=C
   _shepherd_split "$1" 0
 }
 
 _shepherd_split() {
-  local s="$1" depth="$2" n=${#1} i=0 j level c q="" word="" inword=0
+  local s="$1" depth="$2" n=${#1} i=0 j level c q="" sq word="" inword=0
   local -a words=()
-  (( depth > SHEPHERD_SPLIT_DEPTH )) && return 0
+  if (( depth > SHEPHERD_SPLIT_DEPTH )); then
+    SHEPHERD_SPLIT_TRUNCATED=1
+    return 0
+  fi
   while (( i < n )); do
     c=${s:i:1}
     if [[ "$q" == "'" ]]; then
@@ -41,12 +45,22 @@ _shepherd_split() {
       i=$((i + 2)); continue
     fi
     if [[ "$c" == '$' && "${s:i+1:1}" == '(' ]]; then
-      j=$((i + 2)); level=1
+      j=$((i + 2)); level=1; sq=""
       while (( j < n && level > 0 )); do
-        case ${s:j:1} in
-          '(') level=$((level + 1)) ;;
-          ')') level=$((level - 1)) ;;
-        esac
+        c=${s:j:1}
+        if [[ "$sq" == "'" ]]; then
+          [[ "$c" == "'" ]] && sq=""
+        elif [[ "$c" == '\' ]]; then
+          j=$((j + 1))
+        elif [[ "$sq" == '"' ]]; then
+          [[ "$c" == '"' ]] && sq=""
+        else
+          case "$c" in
+            "'" | '"') sq=$c ;;
+            '(') level=$((level + 1)) ;;
+            ')') level=$((level - 1)) ;;
+          esac
+        fi
         j=$((j + 1))
       done
       _shepherd_split "${s:i+2:j-i-2-(level == 0)}" $((depth + 1))

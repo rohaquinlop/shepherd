@@ -122,8 +122,10 @@ shepherd_dir() {
   branch=$(shepherd_branch) || return 1
   [[ -n "$branch" ]] || return 1
   shepherd_migrate_legacy "$base"
-  printf '%s/%s' "$base" "${branch//\//__}"
+  shepherd_branch_dir "$base" "$branch"
 }
+
+shepherd_branch_dir() { printf '%s/%s' "$1" "${2//\//__}"; }
 
 shepherd_state_file() {
   local dir
@@ -219,7 +221,8 @@ shepherd_in_list() {
 # stub in the gate dir that runs the repo's own hook (hooks/git-chain.sh).
 SHEPHERD_CLIENT_HOOKS="applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit
   prepare-commit-msg commit-msg post-commit pre-rebase post-checkout post-merge post-rewrite
-  pre-auto-gc reference-transaction sendemail-validate post-index-change"
+  pre-auto-gc reference-transaction sendemail-validate post-index-change
+  p4-changelist p4-prepare-changelist p4-post-changelist p4-pre-submit"
 
 shepherd_githooks_dir() {
   local base
@@ -242,7 +245,8 @@ shepherd_uninstall_git_gate() {
 # Skipped, with a warning, when the shared config has core.worktree or
 # core.bare=true (git-worktree(1): those must leave the shared config once the
 # extension is on), when the extension is off on purpose, or when this
-# worktree sets its own core.hooksPath. Reinstalls, so a new plugin path takes.
+# worktree sets its own core.hooksPath. Reinstalls, so the gate copy matches
+# the running plugin.
 # `git worktree add` copies config.worktree, so a new worktree may point at
 # another worktree's gate dir; that path is replaced with its own.
 shepherd_install_git_gate() {
@@ -269,14 +273,12 @@ shepherd_install_git_gate() {
   for name in $SHEPHERD_CLIENT_HOOKS; do
     printf '#!/bin/sh\nexec "$(dirname "$0")/chain" %s "$@"\n' "$name" >"$dir/$name"
   done
-  printf '%s\n' '#!/bin/sh' "gate='$root/hooks/git-pre-push.sh'" \
-    'if [ ! -f "$gate" ]; then' \
-    '  echo "shepherd: push gate $gate is missing. Run \`shepherd init\` on this branch to reinstall it, or \`git config --worktree --unset core.hooksPath\` to remove it." >&2' \
-    '  exit 1' \
-    'fi' \
-    'refs=$(cat)' \
-    'printf "%s\n" "$refs" | bash "$gate" "$@" || exit 1' \
+  mkdir -p "$dir/gate/hooks" "$dir/gate/lib" \
+    && cp "$root/hooks/git-pre-push.sh" "$dir/gate/hooks/" && cp "$root/lib/state.sh" "$dir/gate/lib/" || return 1
+  printf '%s\n' '#!/bin/sh' 'refs=$(cat)' \
+    'printf "%s\n" "$refs" | bash "$(dirname "$0")/gate/hooks/git-pre-push.sh" "$@" || exit 1' \
     'printf "%s\n" "$refs" | exec "$(dirname "$0")/chain" pre-push "$@"' >"$dir/pre-push"
-  chmod +x "$dir"/*
+  chmod +x "$dir/chain" "$dir/pre-push"
+  for name in $SHEPHERD_CLIENT_HOOKS; do chmod +x "$dir/$name"; done
   git config --worktree core.hooksPath "$dir"
 }
