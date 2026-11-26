@@ -31,21 +31,39 @@ While a diagnosis is active, a hook blocks edits to anything in the repo except 
 
 The fix runs in a new session, so it starts from the proven facts instead of the diagnosis session's dead ends.
 
+## Propose before you build
+
+When you have an idea and do not know yet if it is possible, start with:
+
+```
+/shepherd:propose <idea, issue, Jira key, or pasted text>
+```
+
+repo rules → current state → impact map (callers, siblings, duplicates) → assumptions, each settled by the cheapest read-only check → verdict → options with a rule-compliant recommendation → slices → `docs/proposals/<date>-<slug>.md`
+
+The same guard as a diagnosis keeps the session read-only. Each slice is one PR with its dependencies and acceptance criteria. Implement in a new session:
+
+```
+/shepherd:run docs/proposals/<date>-<slug>.md            # every slice
+/shepherd:run docs/proposals/<date>-<slug>.md#slice-1    # one slice
+```
+
 ## What runs where
 
 | Part | Role |
 |---|---|
 | `skills/run` | The playbook. Claude follows it in your main session and writes the code there. |
 | `skills/diagnose` | Finds and proves a root cause, writes it to `docs/diagnoses/`. Never fixes. |
+| `skills/propose` | Checks whether an idea is possible, writes a verdict, options, and slices to `docs/proposals/`. Never implements. |
 | `skills/followup` | Parks a verified, out-of-scope side issue as a GitHub issue or Jira draft, after your yes. Never widens the current change. |
-| `hooks/diagnose-guard.sh` | While a diagnosis is active, blocks edits outside the write-up and scratch dir, and git commands that change state. |
+| `hooks/diagnose-guard.sh` | While a diagnosis or a proposal is active, blocks edits outside the write-up and scratch dir, and git commands that change state. |
 | `agents/reviewer` | A fresh reviewer with only `Read`, `Grep`, and `Glob`. It reads a review bundle and the target branch's rules, then returns findings or `current at <sha>`. |
 | `scripts/shepherd.sh` | State, decision log, review budget, review bundle, PR threads. |
 | `hooks/session-start.sh` | Loads the brief and state into a new or cleared session on that branch. |
 | `hooks/pre-push.sh` | Blocks `git push` unless HEAD's tree was cleared by the review gate. Blocks force pushes and `gh pr merge`. |
 | `hooks/stop.sh` | Blocks the turn from ending while the loop is in an active phase (at most 3 times in a row). |
 
-The hooks do nothing on branches without shepherd state, and the diagnose guard does nothing without an active diagnosis.
+The hooks do nothing on branches without shepherd state, and the diagnose guard does nothing without an active diagnosis or proposal.
 
 ## Why it is cheap on tokens
 
@@ -154,7 +172,7 @@ Per branch, in `shepherd/<branch>/` under the worktree's git dir (`git rev-parse
 - `last-bundle.md`: the last review bundle, kept when the clean checkout is removed
 - `state.json`: phase, PR, review budget, cleared tree
 
-Per worktree, for an active diagnosis, in `shepherd/_diagnose/` under the same git dir: `active.json` (turns the guard on) and `scratch/<slug>/` for probes. The write-up itself is in `docs/diagnoses/`, which is not excluded from git: commit it only if you want it in the repo.
+Per worktree, for an active diagnosis or proposal (one at a time), in `shepherd/_diagnose/` under the same git dir: `active.json` (turns the guard on; `kind` says which) and `scratch/<slug>/` for probes. The write-up itself is in `docs/diagnoses/` or `docs/proposals/`, which are not excluded from git: commit it only if you want it in the repo.
 
 Older versions kept this in `.claude/shepherd/` in the work tree. The first shepherd command or hook in that worktree moves it to the git dir.
 

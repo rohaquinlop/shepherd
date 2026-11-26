@@ -3,7 +3,7 @@
 # usage: bash tests/state_dir.sh [shepherd checkout]   (default: this checkout)
 set -u
 REPO="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"; CLI="$REPO/scripts/shepherd.sh"; HOOKS="$REPO/hooks"
-T=$(mktemp -d); pass=0; fail=0
+T=$(cd "$(mktemp -d)" && pwd -P); pass=0; fail=0
 ok() { if eval "$2"; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }
 mkrepo() { git init -q -b main "$1" && git -C "$1" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init; }
 sh() { (cd "$1" && shift && bash "$CLI" "$@"); }
@@ -22,7 +22,29 @@ ok "diagnose under git dir" '[[ -f "$T/a/.git/shepherd/_diagnose/active.json" &&
 guard() { jq -n --arg cwd "$1" --arg f "$2" '{cwd:$cwd, tool_name:"Write", tool_input:{file_path:$f}}' | bash "$HOOKS/diagnose-guard.sh"; }
 ok "guard allows scratch" '[[ -z "$(guard "$T/a" "$scr/p.sh")" ]]'
 ok "guard denies src" 'guard "$T/a" "$T/a/src.c" | grep -q deny'
+ok "propose refused while diagnosis active" '! sh "$T/a" propose start --slug idea 2>/dev/null'
+ok "propose status names active diagnosis" 'sh "$T/a" propose status | grep -q "diagnosis .probe. is active"'
+ok "propose end refused for a diagnosis" '! sh "$T/a" propose end 2>/dev/null && [[ -f "$T/a/.git/shepherd/_diagnose/active.json" ]]'
 sh "$T/a" diagnose end >/dev/null
+
+# 2b. propose + guard
+out=$(sh "$T/a" propose start --slug idea)
+w=$(sed -n 's/^writeup: //p' <<<"$out"); scr=$(sed -n 's/^scratch: //p' <<<"$out")
+ok "proposal write-up from template" '[[ "$w" == "$T/a/docs/proposals/"*-idea.md ]] && head -1 "$w" | grep -q "^# Proposal"'
+ok "proposal kind recorded" '[[ "$(jq -r .kind "$T/a/.git/shepherd/_diagnose/active.json")" == proposal ]]'
+ok "proposal guard allows write-up" '[[ -z "$(guard "$T/a" "$w")" ]]'
+ok "proposal guard allows scratch" '[[ -z "$(guard "$T/a" "$scr/spike.sh")" ]]'
+ok "proposal guard denies src" 'guard "$T/a" "$T/a/src.c" | grep -q "shepherd propose:.*proposal"'
+ok "proposal guard denies docs/diagnoses" 'guard "$T/a" "$T/a/docs/diagnoses/x.md" | grep -q deny'
+ok "diagnose end refused for a proposal" '! sh "$T/a" diagnose end 2>/dev/null'
+ok "diagnose start refused while proposal active" '! sh "$T/a" diagnose start --slug other 2>/dev/null'
+sh "$T/a" propose end >/dev/null
+ok "proposal ended" '[[ ! -e "$T/a/.git/shepherd/_diagnose/active.json" && -f "$w" ]]'
+jq -n --arg s "$scr" '{slug:"old", writeup:"w", scratch:$s}' > "$T/a/.git/shepherd/_diagnose/active.json"
+ok "kindless active.json is a diagnosis" 'sh "$T/a" propose status | grep -q "diagnosis .old. is active"'
+ok "kindless guard allows docs/diagnoses" '[[ -z "$(guard "$T/a" "$T/a/docs/diagnoses/x.md")" ]]'
+ok "kindless guard denies docs/proposals" 'guard "$T/a" "$T/a/docs/proposals/x.md" | grep -q "Diagnosis .old. is active: diagnose only"'
+rm "$T/a/.git/shepherd/_diagnose/active.json"
 
 # 3. legacy migration
 mkrepo "$T/b"; git -C "$T/b" switch -q -c fix/y
