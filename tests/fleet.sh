@@ -98,6 +98,9 @@ ok "next adds a slice appended by a re-plan" '[[ "$(jq -c ".slices[\"5\"] | [.ti
 sed -i.bak 's/^### slice-5: added$/### slice-5: renamed/' "$P" && rm "$P.bak"
 sh "$A" fleet next >/dev/null
 ok "next takes an edit to a slice that has not started" '[[ "$(jq -r ".slices[\"5\"].title" "$rec")" == renamed ]]'
+sed -i.bak 's/^- \*\*Depends on:\*\* slice-3$/- **Depends on:** slice-3, slice-9/' "$P" && rm "$P.bak"
+ok "next refuses an edit to an unknown dependency" '! sh "$A" fleet next 2>/dev/null && [[ "$(jq -c ".slices[\"5\"].depends" "$rec")" == "[3]" ]]'
+sed -i.bak 's/^- \*\*Depends on:\*\* slice-3, slice-9$/- **Depends on:** slice-3/' "$P" && rm "$P.bak"
 printf '### slice-6: bad\n- **Depends on:** slice-9\n- **Files:** `f.sh`\n' >> "$P"
 ok "next refuses a re-plan with an unknown dependency" '! sh "$A" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"6\"]" "$rec")" == null ]]'
 sed -i.bak '/^### slice-6/,$d' "$P" && rm "$P.bak"

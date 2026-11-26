@@ -77,7 +77,7 @@ The same guard as a diagnosis keeps the session read-only. Each slice is one PR 
 | `hooks/pre-push.sh` | Blocks `git push` unless HEAD's tree was cleared by the review gate. Blocks force pushes and `gh pr merge`. |
 | `hooks/stop.sh` | Blocks the turn from ending while the loop or the lead is in an active phase (at most 3 times in a row). |
 
-The hooks do nothing on branches without shepherd state, and the diagnose guard does nothing without an active diagnosis or proposal.
+The hooks do nothing on branches without shepherd state (except the Stop and SessionStart hooks for an active lead, read from the fleet record), and the diagnose guard does nothing without an active diagnosis or proposal.
 
 ## Why it is cheap on tokens
 

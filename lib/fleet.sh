@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fleet: run a proposal's slices as parallel shepherd:run sessions, one per
-# git worktree. Sourced by scripts/shepherd.sh after lib/state.sh.
+# git worktree. Sourced after lib/state.sh by scripts/shepherd.sh and the hooks.
 #
 # The record lives in the common git dir, so every worktree sees the same one:
 #   shepherd/_fleet/<slug>.json        slices: title, depends, files, base, branch, worktree, session
@@ -145,14 +145,19 @@ fleet_dispatch() {
   git rev-parse --verify -q "origin/$base" >/dev/null && ref="origin/$base"
   git worktree add -q -b "$branch" "$wt" "$ref" || die "cannot create worktree for slice-$n"
   session=$(uuidgen | tr '[:upper:]' '[:lower:]')
+  # Recorded before the start, so the session's own `fleet self` finds it.
+  if ! fleet_write "$record" --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$session" \
+    '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}'; then
+    git worktree remove --force "$wt"
+    git branch -D -q "$branch"
+    die "cannot write the fleet record"
+  fi
   if ! (cd "$wt" && claude --bg -n "shepherd-$slug-slice-$n" --session-id "$session" "/shepherd:run $proposal#slice-$n" >/dev/null); then
+    fleet_write "$record" --arg n "$n" '.slices[$n] += {base: null, branch: null, worktree: null, session: null}'
     git worktree remove --force "$wt"
     git branch -D -q "$branch"
     die "cannot start the session for slice-$n"
   fi
-  fleet_write "$record" --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$session" \
-    '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}' \
-    || die "slice-$n started as session ${session:0:8}, but the record was not updated; stop it with \`claude stop ${session:0:8}\`"
   echo "dispatched slice-$n on $base ($wt)"
 }
 
@@ -171,15 +176,14 @@ fleet_missing() {
 
 # A started slice stays as recorded: its session has already read the proposal.
 fleet_sync() {
-  local record="$1" proposal slices missing
+  local record="$1" proposal slices missing merge
   proposal=$(jq -r .proposal "$record")
   [[ -f "$proposal" ]] || die "proposal $proposal is gone"
   slices=$(fleet_slices "$proposal")
-  missing=$(fleet_missing "$(jq --argjson s "$slices" '$s + .slices' "$record")")
+  merge='$s + .slices | with_entries(if .value.session == null and $s[.key] != null then .value = $s[.key] else . end)'
+  missing=$(fleet_missing "$(jq --argjson s "$slices" "$merge" "$record")")
   [[ -z "$missing" ]] || die "unknown dependency: $missing"
-  fleet_write "$record" --argjson s "$slices" \
-    '.slices = ($s + .slices | with_entries(if .value.session == null and $s[.key] != null then .value = $s[.key] else . end))' \
-    || die "cannot write the fleet record"
+  fleet_write "$record" --argjson s "$slices" ".slices = ($merge)" || die "cannot write the fleet record"
 }
 
 fleet_next() {
