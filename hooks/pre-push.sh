@@ -3,10 +3,10 @@
 # command in the call (see lib/command.sh):
 #   - deny `gh pr merge` and `gh api` merge writes: shepherd never merges
 #   - deny force pushes: they discard what reviewers already read
-#   - deny a call whose text names a push and `--no-verify`, `core.hooksPath`,
-#     or GIT_CONFIG*: they can skip the git pre-push gate
-#     (hooks/git-pre-push.sh). Read from the raw text, so a push the splitter
-#     does not recognize (`$g push`, `$(command -v git) push`) is still caught
+#   - deny a command with a bare `push` word and a `--no-verify` or
+#     `core.hooksPath` word, or a call with such a command that names
+#     GIT_CONFIG*: they can skip the git pre-push gate (hooks/git-pre-push.sh).
+#     It needs no `git` word, so `$g push` and `$(command -v git) push` count
 #   - deny `git push` unless the worktree is clean and HEAD's tree is the tree
 #     the review gate cleared (see `shepherd clear`)
 # Every other command, and every branch without state, passes through.
@@ -84,9 +84,16 @@ push_denial() {
 }
 
 shepherd_split_command "$cmd"
-push=0 merge=0 reason=""
+push=0 merge=0 bypass=0 push_word=0 reason=""
+shopt -s nocasematch
 for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
   IFS="$SHEPHERD_SEP" read -ra argv <<<"$seg"
+  if [[ "$SHEPHERD_SEP$seg$SHEPHERD_SEP" == *"${SHEPHERD_SEP}push$SHEPHERD_SEP"* ]]; then
+    push_word=1
+    for w in "${argv[@]}"; do
+      [[ "$w" == --no-v* || "$w" == *hookspath* ]] && bypass=1
+    done
+  fi
   if is_merge "${argv[@]}"; then
     merge=1
   elif shepherd_git_parse "${argv[@]}" && [[ "$SHEPHERD_GIT_SUB" == push ]]; then
@@ -94,9 +101,8 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
     [[ -n "$reason" ]] || reason=$(push_denial)
   fi
 done
-
-lower=$(tr '[:upper:]' '[:lower:]' <<<"$cmd")
-[[ "$lower" == *push* && ( "$lower" == *--no-v* || "$lower" == *git_config* || "$lower" == *hookspath* ) ]] && bypass=1 || bypass=0
+(( push_word )) && [[ "$cmd" == *git_config* ]] && bypass=1
+shopt -u nocasematch
 
 (( push || merge || bypass )) || exit 0
 shepherd_is_active || exit 0

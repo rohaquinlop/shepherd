@@ -56,6 +56,9 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'GIT_CONFIG_COUNT=1 $(command -v git) push origin feat/x'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
+for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"'; do
+  ok "hook allows: $c" '! denied "$c"'
+done
 ok "push then rm -f is not a force push" '! denied "git push origin feat/x && rm -f x"'
 ok "cleared push passes" 'pushes "git push -u origin feat/x"'
 ok "git gate chains to the repo pre-push" 'grep -q "^pre-push origin" "$T/repo-hook.log"'
