@@ -10,7 +10,12 @@ sh() { (cd "$1" && shift && bash "$CLI" "$@"); }
 FAKE="$T/fake"; mkdir -p "$FAKE/bin"; echo '[]' > "$FAKE/agents.json"
 cat > "$FAKE/bin/claude" <<EOF
 #!/usr/bin/env bash
-[[ "\$1" == agents ]] && { cat "$FAKE/agents.json"; exit 0; }
+if [[ "\$1" == agents ]]; then
+  [[ -n "\${FAKE_FAIL_AGENTS:-}" ]] && exit 1
+  [[ "\$*" == *--all* ]] && { cat "$FAKE/agents.json"; exit 0; }
+  jq '[.[] | select(.state != "stopped")]' "$FAKE/agents.json"; exit 0
+fi
+[[ -n "\${FAKE_FAIL_BG:-}" && "\$*" == *"--session-id"* ]] && exit 1
 printf '%s\t%s\n' "\$PWD" "\$*" >> "$FAKE/claude.log"
 EOF
 cat > "$FAKE/bin/gh" <<EOF
@@ -38,6 +43,8 @@ cat > "$P" <<'EOF'
 ### slice-4: free
 - **Depends on:** none
 - **Files:** `c.sh`, `d.sh` (new)
+### Notes
+- **Files:** `z.sh`
 ## Open questions
 EOF
 
@@ -80,6 +87,16 @@ echo "use option b" > "$T/answer.txt"
 sh "$A" fleet answer 4 "$T/answer.txt" >/dev/null
 ok "answer stops, then resumes in the worktree" '[[ "$(cut -f2 "$FAKE/claude.log" | head -1)" == "stop $(sess 4 | cut -c1-8)" ]] && grep -q "^$(wt 4)	--bg --resume $(sess 4) use option b$" "$FAKE/claude.log"'
 ok "start refuses a second run" '! sh "$A" fleet start "$P" 2>/dev/null'
+
+ok "status fails without a fleet record" '(cd "$T" && git init -q -b main b) && ! out=$(sh "$T/b" fleet status 2>/dev/null) && [[ -z "$out" ]]'
+ok "status fails when claude agents fails" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet status >/dev/null 2>&1'
+
+C="$T/c"; git init -q -b main "$C"; git -C "$C" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+printf '### slice-1: x\n- **Depends on:** slice-9\n- **Files:** `a`\n' > "$T/bad.md"
+ok "unknown dependency refused, no record" '! sh "$C" fleet start "$T/bad.md" 2>/dev/null && [[ ! -e "$C/.git/shepherd/_fleet/bad.json" ]]'
+printf '### slice-1: x\n- **Depends on:** none\n- **Files:** `a`\n' > "$T/one.md"
+ok "failed session start leaves no worktree or branch" '! FAKE_FAIL_BG=1 sh "$C" fleet start "$T/one.md" 2>/dev/null && [[ $(git -C "$C" worktree list | wc -l) -eq 1 ]] && [[ -z "$(git -C "$C" branch --list "fleet/*")" ]]'
+ok "next succeeds after a failed start" 'sh "$C" fleet next | grep -q "dispatched slice-1"'
 
 echo "pass=$pass fail=$fail"; rm -rf "$T"
 (( fail == 0 ))

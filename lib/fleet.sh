@@ -55,17 +55,26 @@ fleet_parse() {
         line = substr(line, RSTART + RLENGTH)
       }
     }
-    /^## / && n != "" { flush(); n = "" }
+    /^###? / && n != "" { flush(); n = "" }
     END { flush() }
   ' "$1"
 }
 
-fleet_agents() { claude agents --json --all 2>/dev/null || echo '[]'; }
+fleet_agents() { claude agents --json --all 2>/dev/null || die "\`claude agents --json\` failed"; }
+
+fleet_live() {
+  claude agents --json 2>/dev/null | jq -e --arg s "$1" 'any(.[]; .sessionId == $s)' >/dev/null
+}
+
+fleet_halt() {
+  fleet_live "$1" || return 0
+  claude stop "${1:0:8}" >/dev/null 2>&1 || die "cannot stop session ${1:0:8}"
+}
 
 # Live view of every slice as a JSON array, ranked.
 fleet_rows() {
   local record="$1" agents n wt state branch pr pr_state rows="[]"
-  agents=$(fleet_agents)
+  agents=$(fleet_agents) || exit 1
   for n in $(jq -r '.slices | keys[]' "$record" | sort -n); do
     wt=$(jq -r --arg n "$n" '.slices[$n].worktree // empty' "$record")
     state='{}'; branch=""; pr_state=""
@@ -121,8 +130,11 @@ fleet_dispatch() {
   git rev-parse --verify -q "origin/$base" >/dev/null && ref="origin/$base"
   git worktree add -q -b "$branch" "$wt" "$ref" || die "cannot create worktree for slice-$n"
   session=$(uuidgen | tr '[:upper:]' '[:lower:]')
-  (cd "$wt" && claude --bg -n "shepherd-$slug-slice-$n" --session-id "$session" "/shepherd:run $proposal#slice-$n" >/dev/null) \
-    || die "cannot start the session for slice-$n"
+  if ! (cd "$wt" && claude --bg -n "shepherd-$slug-slice-$n" --session-id "$session" "/shepherd:run $proposal#slice-$n" >/dev/null); then
+    git worktree remove --force "$wt"
+    git branch -D -q "$branch"
+    die "cannot start the session for slice-$n"
+  fi
   jq --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$session" \
     '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}' "$record" >"$record.tmp" \
     && mv "$record.tmp" "$record"
@@ -135,7 +147,7 @@ fleet_next() {
   target=$(jq -r .target "$record")
   git fetch -q origin 2>/dev/null
   while :; do
-    rows=$(fleet_rows "$record")
+    rows=$(fleet_rows "$record") || exit 1
     active=$(jq '[.[] | select(.category == "running" or .category == "input" or .category == "stalled")] | length' <<<"$rows")
     (( active < max )) || break
     base=""
@@ -151,7 +163,7 @@ fleet_next() {
 }
 
 fleet_start() {
-  local proposal="$1" max=3 slug record dir parsed
+  local proposal="$1" max=3 slug record dir parsed missing
   shift
   [[ "$1" == "--max" && -n "$2" ]] && max="$2"
   [[ -f "$proposal" ]] || die "fleet start <proposal> [--max N]"
@@ -171,13 +183,16 @@ fleet_start() {
        depends: (if .[2] == "" then [] else (.[2] | split(",") | map(tonumber)) end),
        files: (if .[3] == "" then [] else (.[3] | split(",")) end),
        base: null, branch: null, worktree: null, session: null}}] | from_entries)}
-  ' <<<"$parsed" >"$record"
+  ' <<<"$parsed" >"$record.tmp" || die "cannot write the fleet record"
+  missing=$(jq -r '(.slices | keys) as $k | [.slices[].depends[] | tostring | select(. as $d | $k | index($d) | not)] | unique | map("slice-" + .) | join(", ")' "$record.tmp")
+  [[ -z "$missing" ]] || { rm -f "$record.tmp"; die "unknown dependency: $missing"; }
+  mv "$record.tmp" "$record"
   fleet_next "$record"
 }
 
 fleet_status() {
   local record="$1" json="$2" rows
-  rows=$(fleet_rows "$record")
+  rows=$(fleet_rows "$record") || exit 1
   if [[ "$json" == "--json" ]]; then
     jq 'map(del(.rank))' <<<"$rows"
     return
@@ -187,13 +202,14 @@ fleet_status() {
 }
 
 fleet_wait() {
-  local record="$1" timeout="${2:-1800}" interval="${SHEPHERD_FLEET_INTERVAL:-30}" start now changed
-  snapshot() { fleet_rows "$record" | jq -c 'map({slice, category, phase, pr}) | sort_by(.slice)'; }
-  start=$(snapshot)
+  local record="$1" timeout="${2:-1800}" interval="${SHEPHERD_FLEET_INTERVAL:-30}" start now now_rows changed
+  snapshot() { local rows; rows=$(fleet_rows "$record") || exit 1; jq -c 'map({slice, category, phase, pr}) | sort_by(.slice)' <<<"$rows"; }
+  start=$(snapshot) || exit 1
   now=$SECONDS
   while (( SECONDS - now < timeout )); do
     sleep "$interval"
-    changed=$(jq -rn --argjson a "$start" --argjson b "$(snapshot)" '
+    now_rows=$(snapshot) || exit 1
+    changed=$(jq -rn --argjson a "$start" --argjson b "$now_rows" '
       [$b[] as $r | ($a[] | select(.slice == $r.slice)) as $o | select($o != $r)
        | "slice-\($r.slice): \($o.category)/\($o.phase // "-") -> \($r.category)/\($r.phase // "-")"] | .[]')
     [[ -n "$changed" ]] && { echo "$changed"; return 0; }
@@ -210,7 +226,7 @@ fleet_answer() {
   [[ -n "$session" && -d "$wt" ]] || die "slice-$n has no session"
   # Resuming a live session copies it into the caller's cwd, so stop it first
   # and resume from its own worktree.
-  claude stop "${session:0:8}" >/dev/null 2>&1
+  fleet_halt "$session"
   (cd "$wt" && claude --bg --resume "$session" "$(cat "$file")" >/dev/null) || die "cannot resume slice-$n"
   echo "answered slice-$n"
 }
@@ -218,21 +234,26 @@ fleet_answer() {
 fleet_stop() {
   local record="$1" session
   for session in $(jq -r '.slices[].session // empty' "$record"); do
-    claude stop "${session:0:8}" >/dev/null 2>&1 && echo "stopped ${session:0:8}"
+    fleet_live "$session" || continue
+    fleet_halt "$session"
+    echo "stopped ${session:0:8}"
   done
 }
 
 cmd_fleet() {
-  local sub="$1" slug=""
+  local sub="$1" slug="" record
   shift
   [[ "$sub" == start ]] && { fleet_start "$@"; return; }
   if [[ "$1" == "--fleet" ]]; then slug="$2"; shift 2; fi
   case "$sub" in
-    status) fleet_status "$(fleet_record "$slug")" "$1" ;;
-    wait) [[ "$1" == "--timeout" ]] && shift; fleet_wait "$(fleet_record "$slug")" "$1" ;;
-    next) fleet_next "$(fleet_record "$slug")" ;;
-    answer) fleet_answer "$(fleet_record "$slug")" "$@" ;;
-    stop) fleet_stop "$(fleet_record "$slug")" ;;
+    status|wait|next|answer|stop) record=$(fleet_record "$slug") || exit 1 ;;
+  esac
+  case "$sub" in
+    status) fleet_status "$record" "$1" ;;
+    wait) [[ "$1" == "--timeout" ]] && shift; fleet_wait "$record" "$1" ;;
+    next) fleet_next "$record" ;;
+    answer) fleet_answer "$record" "$@" ;;
+    stop) fleet_stop "$record" ;;
     *) die "fleet start <proposal> [--max N] | [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | stop" ;;
   esac
 }
