@@ -316,7 +316,7 @@ cmd_review_start_plan() {
   n=$(shepherd_get plan_reviews)
   max=$(shepherd_get max_plan_reviews)
   n=${n:-0} max=${max:-2}
-  (( n < max )) || die "plan review budget spent ($n of $max). Go to step 6: implement if the review is clean and every choice is settled; otherwise ask one question on the unsettled choice."
+  (( n < max )) || die "plan review budget spent ($n of $max). Go to plan design review step 6: implement if the review is clean and every choice is settled; otherwise ask one question on the unsettled choice."
   n=$((n + 1))
   shepherd_set "plan_reviews:=$n"
   cmd_decision --title "plan review $n of $max reserved" --decision "dispatched" \
