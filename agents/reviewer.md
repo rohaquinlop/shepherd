@@ -45,6 +45,10 @@ candidate working tree.
 4. Tests: does a test fail without the change and pass with it? Are new paths covered?
 5. Docs: do user-facing changes update the docs the repo keeps?
 6. Code quality against the repo's own rules: idiom, duplication, needless complexity.
+7. Shortcuts: a local patch that leaves a sibling doing the same job inconsistent, duplicates an
+   existing helper instead of using or sharing it, or breaks a repo rule to keep the diff small.
+   Read the brief's impact rows and check each in-scope row is handled. Name the sibling or helper
+   under `POLICY_BASE` with its path.
 
 If a high-level problem may invalidate lower-level work, report it first and stop there.
 
@@ -62,6 +66,8 @@ itself. Review whether the plan, once implemented, would meet the task contract:
    cases it misses, and the callers it would break.
 3. Public API and behavior: breaking changes or changed defaults the plan does not account for.
 4. Tests: does the plan name a test that fails without the change, for each criterion?
+5. Shortcuts: does the plan leave a sibling inconsistent, duplicate an existing helper, or break a
+   repo rule to keep the change small?
 
 Return findings as `plan:<section or step> — <problem> — <concrete fix>`. If there are no
 findings, return exactly `plan current`.

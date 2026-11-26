@@ -76,9 +76,12 @@ The hooks do nothing on branches without shepherd state, and the diagnose guard 
 
 ## When it interrupts you
 
-- A complex task: after a design review of the plan, approve the plan and implement, or revise it. The plan stays out of git.
+shepherd decides by default. A choice is settled when the repo's rules, the source, the brief and decision log, an existing pattern in the code, or something the user said or a check in the session that directly answers the choice settles it. It records the choice and what settled it in `decisions.md`, and keeps going. Its own choices and recommendations must follow the repo's rules and cover the impact check (callers, siblings, duplicates, helpers); it never picks an option only because the diff is smaller.
+
+It stops only for:
+
+- A design, API, or behavioral choice that nothing above settles, including one in a complex task's plan. A complex task whose plan review is clean and whose choices are all settled goes straight to implementation. The plan stays out of git.
 - A Jira story it cannot fetch (no Jira MCP or CLI): it asks you to paste it.
-- A design or API trade-off with no settled answer.
 - A claim it cannot reproduce here (credentials, VPN, a cluster).
 - Findings left after the verify call on the last round's fixes: start a new round, or accept the tree as is.
 - The PR is merge-ready. It never merges.
