@@ -22,9 +22,9 @@ if lead=$(fleet_lead_record); then
     && (( $(jq -r '.lead.stop_blocks // 0' "$lead") < SHEPHERD_MAX_STOP_BLOCKS )); then
     jq '.lead.stop_blocks = ((.lead.stop_blocks // 0) + 1)' "$lead" >"$lead.tmp" && mv "$lead.tmp" "$lead"
     case "$phase" in
-      dispatching) next="run \`shepherd fleet next\`, then start \`shepherd fleet wait\` in the background and set \`fleet lead waiting_fleet\`" ;;
-      triage) next="handle every changed slice (settle or ask its question, start unblocked slices, report stalls), then wait again" ;;
-      verifying) next="finish the goal review and settle its findings, then set \`fleet lead done\`" ;;
+      dispatching) next="set \`shepherd fleet lead waiting_fleet\`, then start \`shepherd fleet wait\` in the background and end the turn" ;;
+      triage) next="handle every changed slice (settle or ask its question, start unblocked slices, report stalls), then set \`shepherd fleet lead waiting_fleet\` and start \`shepherd fleet wait\` in the background" ;;
+      verifying) next="finish checking the slices against the goal, then set \`shepherd fleet lead done\`" ;;
     esac
     reason="shepherd lead phase is '$phase'; the fleet is not at a stopping point. Next: $next. If you need the user, run \`shepherd fleet lead waiting_user\` and ask one question."
     jq -n --arg r "$reason" '{decision: "block", reason: $r}'

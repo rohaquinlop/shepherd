@@ -99,7 +99,7 @@ fleet_rows() {
          else "running" end) as $cat
       | . + [{slice: ($n | tonumber), title: $s.title, category: $cat, rank: $rank[$cat],
               phase: $phase, pr: ($state.pr // null), question: ($state.question // null),
-              branch: (if $branch == "" then $s.branch else $branch end), base: $s.base,
+              branch: (if $branch == "" then $s.branch else $branch end), base: $s.base, target: $rec[0].target,
               session: $s.session, agent: ($a.state // null), depends: $s.depends, files: $s.files}]
       ' <<<"$rows")
   done
@@ -243,16 +243,19 @@ fleet_stop() {
   done
 }
 
-# The fleet record whose lead runs in this checkout and is not done, if any.
-fleet_lead_record() {
+# First fleet record for which the jq filter holds; $r is this checkout's root.
+fleet_find() {
   local root file
   root=$(shepherd_root) || return 1
   for file in "$(fleet_dir)"/*.json; do
     [[ -f "$file" ]] || continue
-    jq -e --arg r "$root" '.lead.root == $r and .lead.phase != "done"' "$file" >/dev/null && { printf '%s' "$file"; return 0; }
+    jq -e --arg r "$root" "$1" "$file" >/dev/null && { printf '%s' "$file"; return 0; }
   done
   return 1
 }
+
+# The fleet record whose lead runs in this checkout and is not done, if any.
+fleet_lead_record() { fleet_find '.lead.root == $r and .lead.phase != "done"'; }
 
 fleet_lead() {
   local record="$1" phase="$2"
@@ -264,16 +267,12 @@ fleet_lead() {
 }
 
 fleet_self() {
-  local root file
-  root=$(shepherd_root) || die "not inside a git repository"
-  for file in "$(fleet_dir)"/*.json; do
-    [[ -f "$file" ]] || continue
-    jq -e --arg r "$root" '
-      . as $f | .slices | to_entries[] | select(.value.worktree == $r)
-      | {slug: $f.slug, proposal: $f.proposal, slice: (.key | tonumber), base: .value.base, target: $f.target}
-    ' "$file" && return 0
-  done
-  die "this worktree is not a fleet slice"
+  local file
+  file=$(fleet_find 'any(.slices[]; .worktree == $r)') || die "this worktree is not a fleet slice"
+  jq --arg r "$(shepherd_root)" '
+    . as $f | .slices | to_entries[] | select(.value.worktree == $r)
+    | {slug: $f.slug, proposal: $f.proposal, slice: (.key | tonumber), base: .value.base, target: $f.target}
+  ' "$file"
 }
 
 cmd_fleet() {

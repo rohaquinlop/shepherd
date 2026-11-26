@@ -72,6 +72,7 @@ ok "overlap with an unmerged slice still waits" '[[ "$(jq -r ".slices[\"3\"].ses
 agents "{\"$(sess 1)\":\"done\",\"$(sess 4)\":\"done\",\"$(sess 2)\":\"blocked\"}"
 state 4 phase=waiting_user question=which
 ok "status ranks ready, input, stalled, pending" '[[ "$(order)" == "[1,4,2,3]" ]]'
+ok "status rows carry the fleet target" '[[ "$(sh "$A" fleet status --json | jq -r "[.[].target] | unique | join(\",\")")" == main ]]'
 ok "status shows the question" '[[ "$(sh "$A" fleet status --json | jq -r ".[] | select(.slice == 4) | .question")" == which ]]'
 
 (sleep 2; sh "$(wt 4)" set phase=implement) &
