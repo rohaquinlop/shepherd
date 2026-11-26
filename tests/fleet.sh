@@ -93,7 +93,10 @@ sh "$A" fleet next >/dev/null
 ok "next adds a slice appended by a re-plan" '[[ "$(jq -c ".slices[\"5\"] | [.title, .depends]" "$rec")" == '"'"'["added",[3]]'"'"' && "$(jq -r ".slices[\"3\"].session" "$rec")" != null ]]'
 printf '### slice-6: bad\n- **Depends on:** slice-9\n- **Files:** `f.sh`\n' >> "$P"
 ok "next refuses a re-plan with an unknown dependency" '! sh "$A" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"6\"]" "$rec")" == null ]]'
-sed -i '' '/^### slice-6/,$d' "$P"
+sed -i.bak '/^### slice-6/,$d' "$P" && rm "$P.bak"
+mv "$P" "$P.away"
+ok "next fails when the proposal is gone" '! sh "$A" fleet next 2>/dev/null'
+mv "$P.away" "$P"
 
 echo "use option b" > "$T/answer.txt"
 : > "$FAKE/claude.log"

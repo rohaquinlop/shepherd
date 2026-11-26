@@ -172,8 +172,10 @@ fleet_missing() {
 
 # Adds the slices a re-plan appended to the proposal; started slices stay as recorded.
 fleet_sync() {
-  local record="$1" slices missing
-  slices=$(fleet_slices "$(jq -r .proposal "$record")") || die "cannot read the proposal"
+  local record="$1" proposal slices missing
+  proposal=$(jq -r .proposal "$record")
+  [[ -f "$proposal" ]] || die "proposal $proposal is gone"
+  slices=$(fleet_slices "$proposal")
   missing=$(fleet_missing "$(jq --argjson s "$slices" '$s + .slices' "$record")")
   [[ -z "$missing" ]] || die "unknown dependency: $missing"
   fleet_write "$record" --argjson s "$slices" '.slices = $s + .slices' || die "cannot write the fleet record"
@@ -331,7 +333,7 @@ fleet_self() {
   file=$(fleet_find 'any(.slices[]; .worktree == $r)') || die "this worktree is not a fleet slice"
   jq --arg r "$(shepherd_root)" '
     . as $f | .slices | to_entries[] | select(.value.worktree == $r)
-    | {slug: $f.slug, proposal: $f.proposal, slice: (.key | tonumber), base: .value.base, target: $f.target}
+    | {slug: $f.slug, slice: (.key | tonumber), base: .value.base, target: $f.target}
   ' "$file"
 }
 
