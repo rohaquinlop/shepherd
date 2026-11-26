@@ -328,7 +328,7 @@ fleet_lead() {
     || die "fleet lead <$SHEPHERD_LEAD_ACTIVE_PHASES $SHEPHERD_LEAD_WAIT_PHASES>"
   [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]] || die "fleet lead runs only in a Claude Code session (CLAUDE_CODE_SESSION_ID is not set)"
   fleet_write "$record" --arg phase "$phase" --arg root "$(shepherd_root)" --arg now "$(shepherd_now)" \
-    --arg session "${CLAUDE_CODE_SESSION_ID:-}" \
+    --arg session "$CLAUDE_CODE_SESSION_ID" \
     '.lead = {phase: $phase, root: $root, session: $session, stop_blocks: 0, updated_at: $now}' || die "cannot write the fleet record"
 }
 
