@@ -29,3 +29,8 @@
 
 ## Affected surface
 - <file> — <role>
+
+## Impact
+| Code | Relation | In scope |
+|------|----------|----------|
+| <file:symbol> | <caller, sibling, duplicate, helper> | <yes or no, and why> |
