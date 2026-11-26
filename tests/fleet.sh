@@ -83,7 +83,10 @@ ok "wait stays quiet when a slice goes back to running" '[[ "$w" == "no fleet ch
 sh "$(wt 4)" set phase=waiting_user
 ok "a change between two waits is reported at once" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: running/implement -> input/waiting_user" ]]'
 ok "an unchanged fleet times out" '! sh "$A" fleet wait --timeout 0 >/dev/null'
-sh "$(wt 4)" set phase=implement
+sh "$(wt 4)" set phase=implement; sh "$A" fleet wait --timeout 0 >/dev/null
+sh "$(wt 4)" set phase=waiting_ci
+ok "a phase change inside running is reported" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: running/implement -> running/waiting_ci" ]]'
+sh "$(wt 4)" set phase=implement; sh "$A" fleet wait --timeout 0 >/dev/null
 echo MERGED > "$FAKE/pr-11"
 sh "$A" fleet next >/dev/null
 ok "next starts a slice once the overlap merged" '[[ "$(jq -r ".slices[\"3\"].base" "$rec")" == main ]]'
@@ -128,6 +131,9 @@ hook "$A" stop.sh >/dev/null; hook "$A" stop.sh >/dev/null
 ok "stop hook gives up after the cap" '[[ -z "$(hook "$A" stop.sh)" ]]'
 sh "$A" fleet lead waiting_fleet
 ok "stop hook lets waiting_fleet end the turn" '[[ -z "$(hook "$A" stop.sh)" ]]'
+sh "$A" fleet lead dispatching; mkdir "$rec.lock"; echo $$ > "$rec.lock/pid"
+ok "stop hook names a locked record instead of blocking" 'hook "$A" stop.sh | jq -e ".systemMessage | test(\"locked\")" >/dev/null'
+rm -rf "$rec.lock"; sh "$A" fleet lead waiting_fleet
 ok "session start is silent for another session" '[[ -z "$(hook "$A" session-start.sh other)" ]]'
 ok "session start names the active lead" 'hook "$A" session-start.sh | jq -r .hookSpecificOutput.additionalContext | grep -q "shepherd lead is active .* fleet .plan. (phase: waiting_fleet)"'
 sh "$A" fleet lead done

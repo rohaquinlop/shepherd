@@ -253,9 +253,9 @@ fleet_wait() {
     if [[ -n "$changed" ]]; then
       seen=$now_rows
       fleet_save_seen "$record" "$seen"
-      # The lead acts on no slice that is running or pending, and its own
-      # dispatches and answers produce exactly those changes.
-      changed=$(grep -Ev ' -> (running|pending)/' <<<"$changed")
+      # The lead's own dispatches, answers, and re-plans move a slice from
+      # new, pending, input, or ready to running or pending; those do not wake it.
+      changed=$(grep -Ev '^slice-[0-9]+: (new|pending|input|ready)/[^ ]* -> (running|pending)/' <<<"$changed")
       [[ -n "$changed" ]] && { echo "$changed"; return 0; }
     fi
     (( SECONDS - now < timeout )) || break
