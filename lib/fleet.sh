@@ -15,6 +15,19 @@ FLEET_RANK='{"ready":0,"input":1,"stalled":2,"running":3,"pending":4,"merged":5}
 
 fleet_dir() { printf '%s/_fleet' "$(shepherd_common_base)"; }
 
+# Applies a jq filter to a record under a lock: the background `fleet wait`
+# writes `.seen` while the lead writes `.lead`, so an unlocked write can drop
+# the other one.
+fleet_write() {
+  local record="$1" tmp rc=1
+  shift
+  shepherd_lock "$record.lock" || return 1
+  tmp=$(mktemp "$record.XXXXXX") && jq "$@" "$record" >"$tmp" && mv "$tmp" "$record" && rc=0
+  (( rc == 0 )) || rm -f "$tmp"
+  rm -rf "$record.lock"
+  return "$rc"
+}
+
 fleet_record() {
   local slug="$1" dir files
   dir=$(fleet_dir)
@@ -137,9 +150,8 @@ fleet_dispatch() {
     git branch -D -q "$branch"
     die "cannot start the session for slice-$n"
   fi
-  jq --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$session" \
-    '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}' "$record" >"$record.tmp" \
-    && mv "$record.tmp" "$record" \
+  fleet_write "$record" --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$session" \
+    '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}' \
     || die "slice-$n started as session ${session:0:8}, but the record was not updated; stop it with \`claude stop ${session:0:8}\`"
   echo "dispatched slice-$n on $base ($wt)"
 }
@@ -233,15 +245,14 @@ fleet_wait() {
 }
 
 fleet_save_seen() {
-  jq --argjson seen "$2" '.seen = $seen' "$1" >"$1.tmp" && mv "$1.tmp" "$1" || die "cannot write the fleet record"
+  fleet_write "$1" --argjson seen "$2" '.seen = $seen' || die "cannot write the fleet record"
 }
 
 fleet_set_base() {
   local record="$1" n="$2" base="$3"
   [[ -n "$n" && -n "$base" ]] || die "fleet base <slice> <branch>"
   jq -e --arg n "$n" '.slices[$n].session != null' "$record" >/dev/null || die "slice-$n has not started"
-  jq --arg n "$n" --arg base "$base" '.slices[$n].base = $base' "$record" >"$record.tmp" \
-    && mv "$record.tmp" "$record" || die "cannot write the fleet record"
+  fleet_write "$record" --arg n "$n" --arg base "$base" '.slices[$n].base = $base' || die "cannot write the fleet record"
 }
 
 fleet_answer() {
@@ -284,9 +295,9 @@ fleet_lead() {
   local record="$1" phase="$2"
   shepherd_in_list "$phase" "$SHEPHERD_LEAD_ACTIVE_PHASES $SHEPHERD_LEAD_WAIT_PHASES" \
     || die "fleet lead <$SHEPHERD_LEAD_ACTIVE_PHASES $SHEPHERD_LEAD_WAIT_PHASES>"
-  jq --arg phase "$phase" --arg root "$(shepherd_root)" --arg now "$(shepherd_now)" \
-    '.lead = {phase: $phase, root: $root, stop_blocks: 0, updated_at: $now}' "$record" >"$record.tmp" \
-    && mv "$record.tmp" "$record" || die "cannot write the fleet record"
+  fleet_write "$record" --arg phase "$phase" --arg root "$(shepherd_root)" --arg now "$(shepherd_now)" \
+    --arg session "${CLAUDE_CODE_SESSION_ID:-}" \
+    '.lead = {phase: $phase, root: $root, session: $session, stop_blocks: 0, updated_at: $now}' || die "cannot write the fleet record"
 }
 
 fleet_self() {

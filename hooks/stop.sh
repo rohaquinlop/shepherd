@@ -16,11 +16,14 @@ input=$(cat)
 cwd=$(jq -r '.cwd // empty' <<<"$input")
 [[ -n "$cwd" ]] && cd "$cwd" 2>/dev/null
 
-if lead=$(fleet_lead_record); then
+session=$(jq -r '.session_id // empty' <<<"$input")
+
+if lead=$(fleet_lead_record) \
+  && jq -e --arg s "$session" '(.lead.session // "") as $l | $l == "" or $l == $s' "$lead" >/dev/null; then
   phase=$(jq -r .lead.phase "$lead")
   if shepherd_in_list "$phase" "$SHEPHERD_LEAD_ACTIVE_PHASES" \
     && (( $(jq -r '.lead.stop_blocks // 0' "$lead") < SHEPHERD_MAX_STOP_BLOCKS )); then
-    jq '.lead.stop_blocks = ((.lead.stop_blocks // 0) + 1)' "$lead" >"$lead.tmp" && mv "$lead.tmp" "$lead"
+    fleet_write "$lead" '.lead.stop_blocks = ((.lead.stop_blocks // 0) + 1)'
     case "$phase" in
       dispatching) next="set \`shepherd fleet lead waiting_fleet\`, then start \`shepherd fleet wait\` in the background and end the turn" ;;
       triage) next="handle every changed slice (settle or ask its question, start unblocked slices, report stalls), then set \`shepherd fleet lead waiting_fleet\` and start \`shepherd fleet wait\` in the background" ;;

@@ -24,7 +24,7 @@ cat > "$FAKE/bin/gh" <<EOF
 exit 1
 EOF
 chmod +x "$FAKE/bin/claude" "$FAKE/bin/gh"
-export PATH="$FAKE/bin:$PATH" SHEPHERD_FLEET_INTERVAL=1
+export PATH="$FAKE/bin:$PATH" SHEPHERD_FLEET_INTERVAL=1 CLAUDE_CODE_SESSION_ID=lead-1
 
 A="$T/a"; git init -q -b main "$A"; git -C "$A" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 P="$T/plan.md"
@@ -99,8 +99,9 @@ ok "self fails outside a slice worktree" '! sh "$A" fleet self >/dev/null 2>&1'
 sh "$A" fleet base 2 main
 ok "base records a retargeted slice" '[[ "$(jq -r ".slices[\"2\"].base" "$rec")" == main ]]'
 ok "base refuses an unknown slice" '! sh "$A" fleet base 9 main 2>/dev/null'
-hook() { jq -n --arg cwd "$1" '{cwd: $cwd}' | bash "$HOOKS/$2"; }
+hook() { jq -n --arg cwd "$1" --arg s "${3:-lead-1}" '{cwd: $cwd, session_id: $s}' | bash "$HOOKS/$2"; }
 sh "$A" fleet lead dispatching
+ok "stop hook leaves other sessions in the lead checkout alone" '[[ -z "$(hook "$A" stop.sh other)" ]]'
 ok "stop hook blocks an active lead phase" 'hook "$A" stop.sh | jq -e ".decision == \"block\" and (.reason | test(\"lead phase is .dispatching.\"))" >/dev/null'
 hook "$A" stop.sh >/dev/null; hook "$A" stop.sh >/dev/null
 ok "stop hook gives up after the cap" '[[ -z "$(hook "$A" stop.sh)" ]]'
@@ -110,6 +111,8 @@ ok "session start names the active lead" 'hook "$A" session-start.sh | jq -r .ho
 sh "$A" fleet lead done
 ok "a done lead is silent" '[[ -z "$(hook "$A" stop.sh)" && -z "$(hook "$A" session-start.sh)" ]]'
 ok "lead refuses an unknown phase" '! sh "$A" fleet lead planning 2>/dev/null'
+for i in 1 2 3 4 5; do sh "$A" fleet base 2 "b$i" & sh "$A" fleet lead done & done; wait
+ok "parallel record writes keep each other" '[[ "$(jq -r ".lead.phase, .slices[\"2\"].base" "$rec" | xargs)" == "done b"? && -z "$(ls "$rec".* 2>/dev/null)" ]]'
 ok "start refuses a second run" '! sh "$A" fleet start "$P" 2>/dev/null'
 
 ok "status fails without a fleet record" '(cd "$T" && git init -q -b main b) && ! out=$(sh "$T/b" fleet status 2>/dev/null) && [[ -z "$out" ]]'
