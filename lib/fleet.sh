@@ -231,6 +231,7 @@ fleet_wait() {
     now_rows=$(snapshot) || exit 1
     changed=$(jq -rn --argjson a "$seen" --argjson b "$now_rows" '
       [$b[] as $r | (first($a[] | select(.slice == $r.slice)) // {category: "new"}) as $o | select($o != $r)
+       | select(($o.category == "pending" or $o.category == "new") and $r.category == "running" | not)
        | "slice-\($r.slice): \($o.category)/\($o.phase // "-") -> \($r.category)/\($r.phase // "-")"] | .[]')
     if [[ -n "$changed" ]]; then
       fleet_save_seen "$record" "$now_rows"
@@ -288,13 +289,18 @@ fleet_find() {
   return 1
 }
 
-# The fleet record whose lead runs in this checkout and is not done, if any.
-fleet_lead_record() { fleet_find '.lead.root == $r and .lead.phase != "done"'; }
+# The fleet record whose lead is session $1, runs in this checkout, and is not done.
+fleet_lead_record() {
+  local file
+  file=$(fleet_find '.lead.root == $r and .lead.phase != "done"') || return 1
+  jq -e --arg s "$1" '.lead.session == $s' "$file" >/dev/null && printf '%s' "$file"
+}
 
 fleet_lead() {
   local record="$1" phase="$2"
   shepherd_in_list "$phase" "$SHEPHERD_LEAD_ACTIVE_PHASES $SHEPHERD_LEAD_WAIT_PHASES" \
     || die "fleet lead <$SHEPHERD_LEAD_ACTIVE_PHASES $SHEPHERD_LEAD_WAIT_PHASES>"
+  [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]] || die "fleet lead runs only in a Claude Code session (CLAUDE_CODE_SESSION_ID is not set)"
   fleet_write "$record" --arg phase "$phase" --arg root "$(shepherd_root)" --arg now "$(shepherd_now)" \
     --arg session "${CLAUDE_CODE_SESSION_ID:-}" \
     '.lead = {phase: $phase, root: $root, session: $session, stop_blocks: 0, updated_at: $now}' || die "cannot write the fleet record"

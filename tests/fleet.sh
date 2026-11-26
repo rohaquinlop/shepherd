@@ -86,6 +86,8 @@ sh "$(wt 4)" set phase=implement
 echo MERGED > "$FAKE/pr-11"
 sh "$A" fleet next >/dev/null
 ok "next starts a slice once the overlap merged" '[[ "$(jq -r ".slices[\"3\"].base" "$rec")" == main ]]'
+agents "{\"$(sess 1)\":\"done\",\"$(sess 4)\":\"done\",\"$(sess 2)\":\"blocked\",\"$(sess 3)\":\"busy\"}"
+ok "wait skips the lead's own dispatch" '[[ "$(sh "$A" fleet wait --timeout 0)" != *slice-3* ]]'
 
 echo "use option b" > "$T/answer.txt"
 : > "$FAKE/claude.log"
@@ -107,12 +109,16 @@ hook "$A" stop.sh >/dev/null; hook "$A" stop.sh >/dev/null
 ok "stop hook gives up after the cap" '[[ -z "$(hook "$A" stop.sh)" ]]'
 sh "$A" fleet lead waiting_fleet
 ok "stop hook lets waiting_fleet end the turn" '[[ -z "$(hook "$A" stop.sh)" ]]'
+ok "session start is silent for another session" '[[ -z "$(hook "$A" session-start.sh other)" ]]'
 ok "session start names the active lead" 'hook "$A" session-start.sh | jq -r .hookSpecificOutput.additionalContext | grep -q "shepherd lead is active .* fleet .plan. (phase: waiting_fleet)"'
 sh "$A" fleet lead done
 ok "a done lead is silent" '[[ -z "$(hook "$A" stop.sh)" && -z "$(hook "$A" session-start.sh)" ]]'
 ok "lead refuses an unknown phase" '! sh "$A" fleet lead planning 2>/dev/null'
-for i in 1 2 3 4 5; do sh "$A" fleet base 2 "b$i" & sh "$A" fleet lead done & done; wait
-ok "parallel record writes keep each other" '[[ "$(jq -r ".lead.phase, .slices[\"2\"].base" "$rec" | xargs)" == "done b"? && -z "$(ls "$rec".* 2>/dev/null)" ]]'
+ok "lead refuses outside a Claude Code session" '! CLAUDE_CODE_SESSION_ID= sh "$A" fleet lead waiting_fleet 2>/dev/null'
+sh "$A" fleet lead waiting_fleet; sh "$A" fleet base 2 main; pids=()
+for i in 1 2 3 4 5; do sh "$A" fleet base 2 "b$i" & pids+=($!); sh "$A" fleet lead done & pids+=($!); done
+rc=0; for p in "${pids[@]}"; do wait "$p" || rc=1; done
+ok "parallel record writes keep each other" '(( rc == 0 )) && [[ "$(jq -r ".lead.phase, .slices[\"2\"].base" "$rec" | xargs)" == "done b"[1-5] && -z "$(ls "$rec".* 2>/dev/null)" ]]'
 ok "start refuses a second run" '! sh "$A" fleet start "$P" 2>/dev/null'
 
 ok "status fails without a fleet record" '(cd "$T" && git init -q -b main b) && ! out=$(sh "$T/b" fleet status 2>/dev/null) && [[ -z "$out" ]]'

@@ -23,7 +23,7 @@ if shepherd_diagnose_active; then
 "
 fi
 
-if lead=$(fleet_lead_record); then
+if lead=$(fleet_lead_record "$(jq -r '.session_id // empty' <<<"$input")"); then
   context+="A shepherd lead is active in this checkout for fleet '$(jq -r .slug "$lead")' (phase: $(jq -r .lead.phase "$lead")). Resume it with the shepherd:lead skill: read $(jq -r .proposal "$lead"), then run \`shepherd fleet status\`.
 "
 fi

@@ -323,7 +323,7 @@ default*. If a notification tool is available, send one too.
 - The verify call still has findings on the last round's fixes.
 
 When the user answers, record the answer with `$SHEPHERD decision`, run
-`$SHEPHERD set question:=null`, and continue from the phase you were in. In a fleet slice the
+`$SHEPHERD set question:=null` (on every way out of `waiting_user`), and continue from the phase you were in. In a fleet slice the
 answer may come from the lead instead of the user; treat it the same way.
 
 ## Never

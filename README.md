@@ -73,7 +73,7 @@ The same guard as a diagnosis keeps the session read-only. Each slice is one PR 
 | `hooks/diagnose-guard.sh` | While a diagnosis or a proposal is active, blocks edits outside the write-up and scratch dir, and git commands that change state. |
 | `agents/reviewer` | A fresh reviewer with only `Read`, `Grep`, and `Glob`. It reads a review bundle and the target branch's rules, then returns findings or `current at <sha>`. |
 | `scripts/shepherd.sh` | State, decision log, review budget, review bundle, PR threads. |
-| `hooks/session-start.sh` | Loads the brief and state into a new or cleared session on that branch. |
+| `hooks/session-start.sh` | Loads the brief and state into a new or cleared session on that branch, and tells a resumed lead session its fleet. |
 | `hooks/pre-push.sh` | Blocks `git push` unless HEAD's tree was cleared by the review gate. Blocks force pushes and `gh pr merge`. |
 | `hooks/stop.sh` | Blocks the turn from ending while the loop or the lead is in an active phase (at most 3 times in a row). |
 
