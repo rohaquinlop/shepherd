@@ -76,7 +76,7 @@ The hooks do nothing on branches without shepherd state, and the diagnose guard 
 
 ## When it interrupts you
 
-shepherd decides by default. A choice is settled when the repo's rules, the source, the brief and decision log, an existing pattern in the code, or something said or checked in the session answers it. It records the choice and what settled it in `decisions.md`, and keeps going. Its own choices and recommendations must follow the repo's rules and cover the impact check (callers, siblings, duplicates, helpers); it never picks an option only because the diff is smaller.
+shepherd decides by default. A choice is settled when the repo's rules, the source, the brief and decision log, an existing pattern in the code, or something the user said or a check in the session that directly answers the choice settles it. It records the choice and what settled it in `decisions.md`, and keeps going. Its own choices and recommendations must follow the repo's rules and cover the impact check (callers, siblings, duplicates, helpers); it never picks an option only because the diff is smaller.
 
 It stops only for:
 
