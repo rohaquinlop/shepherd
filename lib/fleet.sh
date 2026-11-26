@@ -135,30 +135,49 @@ fleet_base() {
   ' <<<"$rows"
 }
 
+# Session id of the background job named $1 that started at or after epoch
+# second $2. `claude --bg` picks the id itself and can exit 0 without starting a
+# job, so the job is looked up by its name until it shows up or time runs out.
+fleet_await_session() {
+  local name="$1" since="$2" timeout="${SHEPHERD_FLEET_START_TIMEOUT:-30}" start=$SECONDS session
+  while :; do
+    session=$(claude agents --json --all 2>/dev/null | jq -r --arg name "$name" --argjson since "$since" '
+      [.[] | select(.name == $name and (.startedAt // 0) >= $since * 1000)] | sort_by(.startedAt) | last | .sessionId // empty' 2>/dev/null)
+    [[ -n "$session" ]] && { printf '%s' "$session"; return 0; }
+    (( SECONDS - start < timeout )) || return 1
+    sleep 1
+  done
+}
+
 fleet_dispatch() {
-  local record="$1" n="$2" base="$3" slug proposal branch wt session ref
+  local record="$1" n="$2" base="$3" slug proposal branch wt name since session ref
   slug=$(jq -r .slug "$record")
   proposal=$(jq -r .proposal "$record")
   branch="fleet/$slug/slice-$n"
   wt="$(fleet_dir)/worktrees/$slug-slice-$n"
+  name="shepherd-$slug-slice-$n"
   ref="$base"
   git rev-parse --verify -q "origin/$base" >/dev/null && ref="origin/$base"
   git worktree add -q -b "$branch" "$wt" "$ref" || die "cannot create worktree for slice-$n"
-  session=$(uuidgen | tr '[:upper:]' '[:lower:]')
-  # Recorded before the start, so the session's own `fleet self` finds it.
-  if ! fleet_write "$record" --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$session" \
+  # Recorded before the start, so the session's own `fleet self` finds it. The
+  # job name holds the session's place until its real id is known.
+  if ! fleet_write "$record" --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$name" \
     '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}'; then
     git worktree remove --force "$wt"
     git branch -D -q "$branch"
     die "cannot write the fleet record"
   fi
-  if ! (cd "$wt" && claude --bg -n "shepherd-$slug-slice-$n" --session-id "$session" "/shepherd:run $proposal#slice-$n" >/dev/null); then
+  since=$(date +%s)
+  if ! (cd "$wt" && claude --bg -n "$name" "/shepherd:run $proposal#slice-$n" >/dev/null) \
+    || ! session=$(fleet_await_session "$name" "$since"); then
     fleet_write "$record" --arg n "$n" '.slices[$n] += {base: null, branch: null, worktree: null, session: null}' \
       || echo "shepherd: set .slices[\"$n\"].base, .branch, .worktree, and .session to null in $record, or slice-$n never starts" >&2
     git worktree remove --force "$wt"
     git branch -D -q "$branch"
     die "cannot start the session for slice-$n"
   fi
+  fleet_write "$record" --arg n "$n" --arg session "$session" '.slices[$n].session = $session' \
+    || die "slice-$n runs as session $session; set .slices[\"$n\"].session to it in $record"
   echo "dispatched slice-$n on $base ($wt)"
 }
 
