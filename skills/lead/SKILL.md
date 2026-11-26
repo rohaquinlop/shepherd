@@ -21,7 +21,7 @@ Set the phase with `$SHEPHERD fleet lead <phase>` before each change. The Stop h
 | `triage` | handling what changed |
 | `waiting_user` | one question to the user is open |
 | `verifying` | checking the result against the goal |
-| `done` | every slice is merged, or the queue is reported ready |
+| `done` | every slice is merged |
 
 ## 1. Start or resume
 
@@ -34,29 +34,29 @@ Set the phase with `$SHEPHERD fleet lead <phase>` before each change. The Stop h
 
 1. `$SHEPHERD fleet start <proposal> [--max N]`, then `$SHEPHERD fleet lead dispatching`. It starts every slice whose dependencies are merged or ready and whose files do not overlap a running slice. A dependent slice is stacked on its one unmerged, ready dependency.
 2. Each slice session runs with the user's own permission mode. If `fleet status` shows a slice `stalled`, it is most likely waiting on a permission prompt: tell the user the slice and `claude attach <session prefix>`. Never pass a looser permission mode.
-3. `$SHEPHERD fleet lead waiting_fleet`, then run `$SHEPHERD fleet wait --timeout 1800` **as a background command** and end the turn. Do not poll.
+3. Re-arm: read `$SHEPHERD fleet status --json` once more. `fleet wait` reports only changes after it starts, so if any slice now needs action (a question, a new merge, a stall), handle it first (step 3). Then `$SHEPHERD fleet lead waiting_fleet`, run `$SHEPHERD fleet wait --timeout 1800` **as a background command**, and end the turn. Do not poll.
 
 ## 3. On each wake-up
 
-If `fleet wait` timed out with no change, start it again and end the turn. Otherwise `$SHEPHERD fleet lead triage`, then read `$SHEPHERD fleet status --json` and handle each slice by category:
+If `fleet wait` timed out with no change, start it again and end the turn. Otherwise `$SHEPHERD fleet lead triage`, then read `$SHEPHERD fleet status --json` and handle each slice by category. The `fleet wait` output names the slices that changed (`slice-N: <old> -> <new>`):
 
-- **input** (phase `waiting_user`): read its `question`. If it is empty, read the slice's `decisions.md` (in the state dir that `cd <branch's worktree> && $SHEPHERD dir` prints) and `claude logs <session prefix>` to find what it asked. Settle it with the decide-by-default rules in the run skill, plus the proposal's decisions and rules. If settled, write the answer and what settled it to a file, `$SHEPHERD fleet answer <N> <file>`, and add a row to the proposal's **Decisions**. If not, `$SHEPHERD fleet lead waiting_user` and ask the user **one** question: the slice, its question, what you checked, the options, and your recommendation. When the user answers, forward it with `fleet answer` the same way, add it to **Decisions**, then go back to waiting (step 2.3): the user's answer does not wake the fleet.
-- **ready**: nothing to do until it merges. If a slice that others stack on merges, tell each dependent slice with `fleet answer` to merge the target branch and retarget its PR to the fleet's target branch (`gh pr edit <pr> --base <target>`, with `target` from that slice's status row).
-- **merged**: `$SHEPHERD fleet next` to start slices it unblocked.
+- **input** (phase `waiting_user`): read its `question`. If it is empty, read the slice's `decisions.md` (in the state dir that `cd <branch's worktree> && $SHEPHERD dir` prints) and `claude logs <session prefix>` to find what it asked. Settle it with the decide-by-default rules in the run skill, plus the proposal's decisions and rules. If settled, write the answer and what settled it to a file, `$SHEPHERD fleet answer <N> <file>`, and add a row to the proposal's **Decisions**. If not, `$SHEPHERD fleet lead waiting_user` and ask the user **one** question: the slice, its question, what you checked, the options, and your recommendation. When the user answers, forward it with `fleet answer` the same way, add it to **Decisions**, then re-arm (step 2.3): the user's answer does not wake the fleet.
+- **ready**: nothing to do until it merges.
+- **merged**: for a slice that just changed to merged, find every slice whose `base` is its branch, in any category, and tell each with `fleet answer` to merge the fleet's target branch and retarget its PR (`gh pr edit <pr> --base <target>`, with `target` from its status row). Then `$SHEPHERD fleet next` to start slices it unblocked.
 - **stalled**: report it to the user with `claude attach` and `claude logs`; do not restart it yourself.
 - **running**, **pending**: nothing.
 
 Re-plan when a slice reports work its scope does not cover: add a new `### slice-N:` to the proposal with its dependencies, files, and tests, then `fleet next`. Never widen a running slice.
 
-Then wait again (step 2.3), unless every slice is ready or merged: go to step 4.
+Then re-arm (step 2.3). The first time every slice is ready or merged, report first (step 4).
 
 ## 4. Report
 
-When every slice is ready or merged:
+The first time every slice is ready or merged:
 
-1. `$SHEPHERD fleet lead done`.
-2. Report the queue in merge order (dependencies first): slice, PR URL, base, and one line on what it does. Say what the user must do: merge in that order. Then list every question you settled and what settled it, and any open item.
-3. Never merge. After the user merges a slice that others stack on, a new wake-up retargets them (step 3).
+1. Report the queue in merge order (dependencies first): slice, PR URL, base, and one line on what it does. Say what the user must do: merge in that order. Then list every question you settled and what settled it, and any open item.
+2. Keep waiting (step 2.3): each merge wakes you to retarget the slices stacked on it and start any slice it unblocked.
+3. When every slice is merged, `$SHEPHERD fleet lead done` and say so. Never merge.
 
 ## Never
 
