@@ -110,9 +110,35 @@ _shepherd_emit() {
       w=("${w[@]:1}"); continue
     fi
     case "${w[0]##*/}" in
-      command | time)
+      if | then | else | elif | do | while | until | '{' | '!' | exec | nohup | builtin)
+        w=("${w[@]:1}") ;;
+      eval)
+        _shepherd_split "${w[*]:1}" $((depth + 1)); return 0 ;;
+      command | time | nice)
         w=("${w[@]:1}")
-        while [[ "${w[0]:-}" == -* ]]; do w=("${w[@]:1}"); done ;;
+        while [[ "${w[0]:-}" == -* ]]; do
+          case "${w[0]}" in
+            -n) w=("${w[@]:2}") ;;
+            *) w=("${w[@]:1}") ;;
+          esac
+        done ;;
+      timeout)
+        w=("${w[@]:1}")
+        while [[ "${w[0]:-}" == -* ]]; do
+          case "${w[0]}" in
+            -s | -k) w=("${w[@]:2}") ;;
+            *) w=("${w[@]:1}") ;;
+          esac
+        done
+        w=("${w[@]:1}") ;;
+      xargs)
+        w=("${w[@]:1}")
+        while [[ "${w[0]:-}" == -* ]]; do
+          case "${w[0]}" in
+            -I | -n | -L | -P | -d | -E | -s | -a) w=("${w[@]:2}") ;;
+            *) w=("${w[@]:1}") ;;
+          esac
+        done ;;
       env)
         w=("${w[@]:1}")
         while [[ "${w[0]:-}" == -* ]]; do

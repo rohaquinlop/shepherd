@@ -3,13 +3,14 @@
 # command in the call (see lib/command.sh):
 #   - deny `gh pr merge` and `gh api` merge writes: shepherd never merges
 #   - deny force pushes: they discard what reviewers already read
-#   - deny `git push --no-verify` and `git -c core.hooksPath=…`: they skip the
-#     git pre-push gate (hooks/git-pre-push.sh)
+#   - deny `git push --no-verify`, `git -c core.hooksPath=…`, and a push in a
+#     call that names GIT_CONFIG*: they can skip the git pre-push gate
+#     (hooks/git-pre-push.sh)
 #   - deny `git push` unless the worktree is clean and HEAD's tree is the tree
 #     the review gate cleared (see `shepherd clear`)
 # Every other command, and every branch without state, passes through.
-# Without jq it cannot read the call, so it denies any call that names a push
-# or a merge.
+# Without jq it cannot read the call, so on a branch with state (read from the
+# hook's own cwd) it denies any call that names a push or a merge.
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/command.sh"
@@ -18,6 +19,7 @@ input=$(cat)
 
 if ! command -v jq >/dev/null; then
   [[ "$input" == *push* || "$input" == *merge* ]] || exit 0
+  shepherd_is_active || exit 0
   echo "shepherd: jq is not installed, so the push gate cannot read this command. Install jq, then retry." >&2
   exit 2
 fi
@@ -94,6 +96,7 @@ done
 
 (( push || merge )) || exit 0
 shepherd_is_active || exit 0
+(( push )) && [[ -z "$reason" && "$cmd" == *GIT_CONFIG* ]] && reason=$VERIFY_REASON
 
 (( merge )) && deny "$MERGE_REASON"
 [[ -n "$reason" ]] && deny "$reason"

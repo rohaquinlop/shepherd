@@ -47,8 +47,12 @@ ok "main worktree keeps its hooksPath" '[[ "$(git -C "$T/r" config core.hooksPat
 clear_head
 for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push -uf origin feat/x' \
   'git push origin +feat/x' 'git push --force-with-lease origin feat/x' 'git push --no-verify origin feat/x' \
-  'git -c core.hooksPath=/dev/null push origin feat/x'; do
-  ok "hook denies: $c" 'denied "$c"'
+  'git -c core.hooksPath=/dev/null push origin feat/x' 'GIT_CONFIG_COUNT=1 git push origin feat/x' \
+  $'export GIT_CONFIG_PARAMETERS=x\ngit push origin feat/x' 'if true; then git push --no-verify origin feat/x; fi' \
+  '{ git push -f origin feat/x; }' '! git push -f origin feat/x' 'echo origin | xargs -n 1 git push -f' \
+  'eval "git push --no-verify origin feat/x"' 'nohup git push -f origin feat/x' 'timeout -s KILL 5 git push -f' \
+  'while true; do gh pr merge 1; done'; do
+  ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 ok "push then rm -f is not a force push" '! denied "git push origin feat/x && rm -f x"'
 ok "cleared push passes" 'pushes "git push -u origin feat/x"'
@@ -63,9 +67,10 @@ ok "hook allows gh api GET merge" '! denied "gh api repos/o/r/pulls/1/merge"'
 
 # 4. no jq on PATH
 mkdir "$T/bin"; for b in cat dirname git; do ln -s "$(command -v "$b")" "$T/bin/$b"; done
-nojq() { jq -n --arg c "$1" --arg d "$W" '{tool_input:{command:$c}, cwd:$d}' | PATH="$T/bin" "$BASH" "$HOOKS/pre-push.sh" 2>/dev/null; }
-ok "no jq: push denied" 'nojq "git push origin feat/x"; [[ $? == 2 ]]'
-ok "no jq: other command passes" 'nojq "ls"'
+nojq() { jq -n --arg c "$2" '{tool_input:{command:$c}}' | (cd "$1" && PATH="$T/bin" "$BASH" "$HOOKS/pre-push.sh" 2>/dev/null); }
+ok "no jq: push denied" 'nojq "$W" "git push origin feat/x"; [[ $? == 2 ]]'
+ok "no jq: other command passes" 'nojq "$W" "ls"'
+ok "no jq: push on a branch without state passes" 'nojq "$T/r" "git push origin main"'
 
 # 5. other hooks chain; a branch without state passes the git gate
 : >"$T/repo-hook.log"
