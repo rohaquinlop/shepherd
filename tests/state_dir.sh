@@ -22,7 +22,23 @@ ok "diagnose under git dir" '[[ -f "$T/a/.git/shepherd/_diagnose/active.json" &&
 guard() { jq -n --arg cwd "$1" --arg f "$2" '{cwd:$cwd, tool_name:"Write", tool_input:{file_path:$f}}' | bash "$HOOKS/diagnose-guard.sh"; }
 ok "guard allows scratch" '[[ -z "$(guard "$T/a" "$scr/p.sh")" ]]'
 ok "guard denies src" 'guard "$T/a" "$T/a/src.c" | grep -q deny'
+ok "propose refused while diagnosis active" '! sh "$T/a" propose start --slug idea 2>/dev/null'
+ok "propose status names active diagnosis" 'sh "$T/a" propose status | grep -q "diagnosis .probe. is active"'
+ok "propose end refused for a diagnosis" '! sh "$T/a" propose end 2>/dev/null && [[ -f "$T/a/.git/shepherd/_diagnose/active.json" ]]'
 sh "$T/a" diagnose end >/dev/null
+
+# 2b. propose + guard
+out=$(sh "$T/a" propose start --slug idea)
+w=$(sed -n 's/^writeup: //p' <<<"$out"); scr=$(sed -n 's/^scratch: //p' <<<"$out")
+ok "proposal write-up from template" '[[ "$w" == "$T/a/docs/proposals/"*-idea.md ]] && head -1 "$w" | grep -q "^# Proposal"'
+ok "proposal kind recorded" '[[ "$(jq -r .kind "$T/a/.git/shepherd/_diagnose/active.json")" == proposal ]]'
+ok "proposal guard allows write-up" '[[ -z "$(guard "$T/a" "$w")" ]]'
+ok "proposal guard allows scratch" '[[ -z "$(guard "$T/a" "$scr/spike.sh")" ]]'
+ok "proposal guard denies src" 'guard "$T/a" "$T/a/src.c" | grep -q "shepherd propose:.*proposal"'
+ok "proposal guard denies docs/diagnoses" 'guard "$T/a" "$T/a/docs/diagnoses/x.md" | grep -q deny'
+ok "diagnose end refused for a proposal" '! sh "$T/a" diagnose end 2>/dev/null'
+sh "$T/a" propose end >/dev/null
+ok "proposal ended" '[[ ! -e "$T/a/.git/shepherd/_diagnose/active.json" && -f "$w" ]]'
 
 # 3. legacy migration
 mkrepo "$T/b"; git -C "$T/b" switch -q -c fix/y

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse hook on Edit, Write, MultiEdit, NotebookEdit, and Bash. While a
-# diagnosis is active in this worktree, keep it a diagnosis:
-#   - file edits inside the repo are allowed only in the write-up, in
-#     docs/diagnoses/, and in the diagnosis scratch dir; edits to shepherd
+# diagnosis or a proposal is active in this worktree, keep it read-only:
+#   - file edits inside the repo are allowed only in the write-up, in its
+#     docs dir (docs/diagnoses/ or docs/proposals/), and in its scratch dir; edits to shepherd
 #     state in the git dir are denied even when that dir is outside the repo
 #     (a linked worktree)
 #   - git commands that commit, move, or rewrite work are denied
@@ -24,10 +24,14 @@ active=$(shepherd_diagnose_file)
 root=$(shepherd_root)
 writeup=$(jq -r .writeup "$active")
 scratch=$(jq -r .scratch "$active")
+kind=$(jq -r '.kind // "diagnosis"' "$active")
+docs=$(jq -r --arg d "$root/docs/diagnoses" '.docs_dir // $d' "$active")
+skill=diagnose
+[[ "$kind" == proposal ]] && skill=propose
 tool=$(jq -r '.tool_name // empty' <<<"$input")
 
 deny() {
-  jq -n --arg r "shepherd diagnose: $1 Diagnosis '$(jq -r .slug "$active")' is active: diagnose only. Put probes in $scratch. To fix, run \`shepherd diagnose end\` and start /shepherd:run $writeup in a new session." \
+  jq -n --arg r "shepherd $skill: $1 The $kind '$(jq -r .slug "$active")' is active: read-only. Put probes in $scratch. To implement, run \`shepherd $skill end\` and start /shepherd:run $writeup in a new session." \
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
   exit 0
 }
@@ -53,7 +57,7 @@ case "$tool" in
     [[ "$target" == "$(physical "$(shepherd_base)")"/* ]] && deny "editing $target is blocked."
     [[ "$target" == "$root"/* ]] || exit 0
     [[ "$target" == "$(physical "$writeup")" ]] && exit 0
-    [[ "$target" == "$root/docs/diagnoses/"* ]] && exit 0
+    [[ "$target" == "$(physical "$docs")"/* ]] && exit 0
     deny "editing $target is blocked."
     ;;
   Bash)

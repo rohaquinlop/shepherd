@@ -22,6 +22,7 @@
 #   reply COMMENT_ID FILE | resolve THREAD_ID
 #   wait-review [--timeout SECONDS]    block until a new PR review or comment lands
 #   diagnose start --slug SLUG | status | end   diagnosis write-up, scratch dir, edit guard
+#   propose start --slug SLUG | status | end    proposal write-up, scratch dir, same edit guard
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
 
@@ -470,40 +471,54 @@ diagnose_outside_repo() {
   esac
 }
 
-cmd_diagnose() {
-  local sub="$1" slug="" root dir file writeup scratch existing
+# A diagnosis and a proposal share one guarded slot per worktree:
+# _diagnose/active.json. Its `kind` picks the docs dir and template; a file
+# without `kind` is a diagnosis from an older version.
+guarded_session() {
+  local kind="$1" sub="$2" slug="" root dir file writeup scratch existing docs template active_kind
+  local usage="$kind start --slug SLUG | status | end" noun=diagnosis
+  [[ "$kind" == propose ]] && noun=proposal
+  docs="docs/diagnoses"; template="diagnosis.md"
+  [[ "$noun" == proposal ]] && { docs="docs/proposals"; template="proposal.md"; }
   root=$(shepherd_root)
-  [[ -n "$root" ]] || { diagnose_outside_repo "$@"; return; }
-  shift
+  if [[ -z "$root" ]]; then
+    [[ "$noun" == diagnosis ]] || die "$kind needs a git repository"
+    shift; diagnose_outside_repo "$@"; return
+  fi
+  shift 2
   file=$(shepherd_diagnose_file)
   dir=$(dirname "$file")
+  active_kind=""
+  shepherd_diagnose_active && active_kind=$(jq -r '.kind // "diagnosis"' "$file")
   case "$sub" in
     start)
-      [[ "$1" == "--slug" && -n "$2" ]] || die "diagnose start --slug SLUG"
+      [[ "$1" == "--slug" && -n "$2" ]] || die "$kind start --slug SLUG"
       slug=$(slugify "$2")
-      if shepherd_diagnose_active && [[ "$(jq -r .slug "$file")" != "$slug" ]]; then
-        die "diagnosis '$(jq -r .slug "$file")' is still active; end it first"
+      if [[ -n "$active_kind" ]] && [[ "$active_kind" != "$noun" || "$(jq -r .slug "$file")" != "$slug" ]]; then
+        die "$active_kind '$(jq -r .slug "$file")' is still active; end it first"
       fi
       scratch="$dir/scratch/$slug"
-      mkdir -p "$scratch" "$root/docs/diagnoses"
-      existing=$(find "$root/docs/diagnoses" -maxdepth 1 -name "*-$slug.md" | head -1)
-      writeup=${existing:-"$root/docs/diagnoses/$(date +%Y-%m-%d)-$slug.md"}
-      [[ -f "$writeup" ]] || cp "$PLUGIN_ROOT/templates/diagnosis.md" "$writeup"
-      jq -n --arg slug "$slug" --arg writeup "$writeup" --arg scratch "$scratch" --arg now "$(shepherd_now)" \
-        '{slug: $slug, writeup: $writeup, scratch: $scratch, started: $now}' >"$file"
+      mkdir -p "$scratch" "$root/$docs"
+      existing=$(find "$root/$docs" -maxdepth 1 -name "*-$slug.md" | head -1)
+      writeup=${existing:-"$root/$docs/$(date +%Y-%m-%d)-$slug.md"}
+      [[ -f "$writeup" ]] || cp "$PLUGIN_ROOT/templates/$template" "$writeup"
+      jq -n --arg kind "$noun" --arg slug "$slug" --arg writeup "$writeup" --arg docs "$root/$docs" \
+        --arg scratch "$scratch" --arg now "$(shepherd_now)" \
+        '{kind: $kind, slug: $slug, writeup: $writeup, docs_dir: $docs, scratch: $scratch, started: $now}' >"$file"
       printf 'writeup: %s\nscratch: %s\n' "$writeup" "$scratch"
       ;;
     status)
-      shepherd_diagnose_active || { echo "no active diagnosis"; return 0; }
+      [[ -z "$active_kind" ]] && { echo "no active $noun"; return 0; }
+      [[ "$active_kind" == "$noun" ]] || { echo "no active $noun ($active_kind '$(jq -r .slug "$file")' is active)"; return 0; }
       cat "$file"
       ;;
     end)
-      shepherd_diagnose_active || die "no active diagnosis"
+      [[ "$active_kind" == "$noun" ]] || die "no active $noun"
       writeup=$(jq -r .writeup "$file")
       rm -f "$file"
       echo "ended; write-up: $writeup"
       ;;
-    *) die "diagnose start --slug SLUG | status | end" ;;
+    *) die "$usage" ;;
   esac
 }
 
@@ -574,6 +589,6 @@ case "$sub" in
   reply) require_active; cmd_reply "$@" ;;
   resolve) cmd_resolve "$@" ;;
   wait-review) cmd_wait_review "$@" ;;
-  diagnose) cmd_diagnose "$@" ;;
-  *) sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  diagnose|propose) guarded_session "$sub" "$@" ;;
+  *) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

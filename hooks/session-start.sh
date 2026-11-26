@@ -15,7 +15,10 @@ context=""
 
 if shepherd_diagnose_active; then
   writeup=$(jq -r .writeup "$(shepherd_diagnose_file)")
-  context="A shepherd diagnosis is active in this worktree (write-up: ${writeup}). Edits outside the write-up and its scratch dir are blocked. Resume it with the shepherd:diagnose skill; read the write-up first.
+  kind=$(jq -r '.kind // "diagnosis"' "$(shepherd_diagnose_file)")
+  skill=diagnose
+  [[ "$kind" == proposal ]] && skill=propose
+  context="A shepherd ${kind} is active in this worktree (write-up: ${writeup}). Edits outside the write-up and its scratch dir are blocked. Resume it with the shepherd:${skill} skill; read the write-up first.
 "
 fi
 
