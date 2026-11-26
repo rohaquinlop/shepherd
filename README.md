@@ -74,7 +74,8 @@ The same guard as a diagnosis keeps the session read-only. Each slice is one PR 
 | `agents/reviewer` | A fresh reviewer with only `Read`, `Grep`, and `Glob`. It reads a review bundle and the target branch's rules, then returns findings or `current at <sha>`. |
 | `scripts/shepherd.sh` | State, decision log, review budget, review bundle, PR threads. |
 | `hooks/session-start.sh` | Loads the brief and state into a new or cleared session on that branch, and tells a resumed lead session its fleet. |
-| `hooks/pre-push.sh` | Blocks `git push` unless HEAD's tree was cleared by the review gate. Blocks force pushes and `gh pr merge`. |
+| `hooks/pre-push.sh` | Blocks `git push` unless HEAD's tree was cleared by the review gate. Blocks force pushes, `gh pr merge`, and `gh api` merge writes. Blocks `git push --no-verify` and `git -c core.hooksPath=…`, which skip the git gate. Reads each command in a call (lines, `;`, `&&`, pipes, `$()`, backticks, `bash -c`, `env`). Without `jq` it blocks any call that names a push or a merge. |
+| `hooks/git-pre-push.sh` | The git gate. `shepherd init` sets the worktree's `core.hooksPath` (per worktree, through `extensions.worktreeConfig`) to `shepherd/_githooks/` in its git dir. Its `pre-push` rejects a push of a branch with state unless the pushed tree is the cleared tree and the push fast-forwards, whatever command ran it. Every other hook there runs the repo's own hook of that name (`hooks/git-chain.sh`). |
 | `hooks/stop.sh` | Blocks the turn from ending while the loop or the lead is in an active phase (at most 3 times in a row). |
 
 The hooks do nothing on branches without shepherd state (except the Stop and SessionStart hooks for an active lead, read from the fleet record), and the diagnose guard does nothing without an active diagnosis or proposal.
@@ -189,6 +190,8 @@ Per branch, in `shepherd/<branch>/` under the worktree's git dir (`git rev-parse
 - `last-bundle.md`: the last review bundle, kept when the clean checkout is removed
 - `state.json`: phase, PR, review budget, cleared tree
 
+Per worktree, in `shepherd/_githooks/` under the same git dir: the git gate's hook stubs. When `extensions.worktreeConfig` is unset, `init` sets it to `true` in the shared config, so per-worktree config applies to the whole repo. Running `shepherd init` again reinstalls them, for example after a plugin update moves the plugin path. To remove the gate: `git config --worktree --unset core.hooksPath`. It is not installed when the shared config sets `core.worktree` or `core.bare=true`, sets `extensions.worktreeConfig=false`, or the worktree sets its own `core.hooksPath`; `init` prints a warning and the PreToolUse hook still gates pushes.
+
 Per worktree, for an active diagnosis or proposal (one at a time), in `shepherd/_diagnose/` under the same git dir: `active.json` (turns the guard on; `kind` says which) and `scratch/<slug>/` for probes. The write-up itself is in `docs/diagnoses/` or `docs/proposals/`, which are not excluded from git: commit it only if you want it in the repo.
 
 For a fleet, in `shepherd/_fleet/` under the common git dir (shared by all worktrees): `<slug>.json` (each slice's dependencies, files, base, branch, worktree, session, and the lead's phase) and `worktrees/<slug>-slice-N/`.
@@ -197,6 +200,7 @@ Older versions kept this in `.claude/shepherd/` in the work tree. The first shep
 
 ## Limits
 
+- `git push --no-verify` skips the git gate. The PreToolUse hook denies it in Claude Code; a `--no-verify` push from your own terminal is not checked.
 - The diagnose guard sees file edits and git commands, not shell redirects or `sed -i`. The skill forbids those, but the hook cannot block them.
 - The reviewer subagent starts in your working tree, so Claude Code may load that tree's `CLAUDE.md`. The reviewer is told to treat candidate instruction files as review material and to read rules from the clean target-branch checkout, but the harness does not enforce this.
 - Invoking `/shepherd:run` authorizes branching, commits, pushes, and PR replies for that change. Your global "never commit unless asked" rule does not stop it.
