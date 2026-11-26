@@ -243,13 +243,47 @@ fleet_stop() {
   done
 }
 
+# The fleet record whose lead runs in this checkout and is not done, if any.
+fleet_lead_record() {
+  local root file
+  root=$(shepherd_root) || return 1
+  for file in "$(fleet_dir)"/*.json; do
+    [[ -f "$file" ]] || continue
+    jq -e --arg r "$root" '.lead.root == $r and .lead.phase != "done"' "$file" >/dev/null && { printf '%s' "$file"; return 0; }
+  done
+  return 1
+}
+
+fleet_lead() {
+  local record="$1" phase="$2"
+  shepherd_in_list "$phase" "$SHEPHERD_LEAD_ACTIVE_PHASES $SHEPHERD_LEAD_WAIT_PHASES" \
+    || die "fleet lead <$SHEPHERD_LEAD_ACTIVE_PHASES $SHEPHERD_LEAD_WAIT_PHASES>"
+  jq --arg phase "$phase" --arg root "$(shepherd_root)" --arg now "$(shepherd_now)" \
+    '.lead = {phase: $phase, root: $root, stop_blocks: 0, updated_at: $now}' "$record" >"$record.tmp" \
+    && mv "$record.tmp" "$record" || die "cannot write the fleet record"
+}
+
+fleet_self() {
+  local root file
+  root=$(shepherd_root) || die "not inside a git repository"
+  for file in "$(fleet_dir)"/*.json; do
+    [[ -f "$file" ]] || continue
+    jq -e --arg r "$root" '
+      . as $f | .slices | to_entries[] | select(.value.worktree == $r)
+      | {slug: $f.slug, proposal: $f.proposal, slice: (.key | tonumber), base: .value.base, target: $f.target}
+    ' "$file" && return 0
+  done
+  die "this worktree is not a fleet slice"
+}
+
 cmd_fleet() {
   local sub="$1" slug="" record
   shift
   [[ "$sub" == start ]] && { fleet_start "$@"; return; }
+  [[ "$sub" == self ]] && { fleet_self; return; }
   if [[ "$1" == "--fleet" ]]; then slug="$2"; shift 2; fi
   case "$sub" in
-    status|wait|next|answer|stop) record=$(fleet_record "$slug") || exit 1 ;;
+    status|wait|next|answer|stop|lead) record=$(fleet_record "$slug") || exit 1 ;;
   esac
   case "$sub" in
     status) fleet_status "$record" "$1" ;;
@@ -257,6 +291,7 @@ cmd_fleet() {
     next) fleet_next "$record" ;;
     answer) fleet_answer "$record" "$@" ;;
     stop) fleet_stop "$record" ;;
-    *) die "fleet start <proposal> [--max N] | [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | stop" ;;
+    lead) fleet_lead "$record" "$1" ;;
+    *) die "fleet start <proposal> [--max N] | [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | stop | lead PHASE | self" ;;
   esac
 }

@@ -2,7 +2,7 @@
 # shepherd CLI. The run skill calls this for every state change, so the hooks
 # and a resumed session always see the same truth on disk.
 #
-#   init [--issue N] [--pr N] [--jira KEY] [--url URL]   create branch state
+#   init [--issue N] [--pr N] [--jira KEY] [--url URL] [--target BRANCH]   create branch state
 #   dir                                print this branch's state dir
 #   branch-name --summary TEXT [--ref REF] [--type TYPE] [--apply]   render the branch pattern;
 #                                      --apply switches to it when the branch is fresh
@@ -24,7 +24,8 @@
 #   diagnose start --slug SLUG | status | end   diagnosis write-up, scratch dir, edit guard
 #   propose start --slug SLUG | status | end    proposal write-up, scratch dir, same edit guard
 #   fleet start PROPOSAL [--max N]     start a session per ready slice, each in its own worktree
-#   fleet [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | stop
+#   fleet [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | stop | lead PHASE
+#   fleet self                         this worktree's slice: slug, slice, base, target
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/fleet.sh"
@@ -39,13 +40,14 @@ require_active() { shepherd_is_active || die "no state for this branch; run \`sh
 repo_slug() { gh repo view --json nameWithOwner -q .nameWithOwner; }
 
 cmd_init() {
-  local issue="" pr="" jira="" url="" kind="text" ref="" dir max max_plan
+  local issue="" pr="" jira="" url="" target="" kind="text" ref="" dir max max_plan
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --issue) issue="$2"; shift 2 ;;
       --pr) pr="$2"; shift 2 ;;
       --jira) jira="$2"; shift 2 ;;
       --url) url="$2"; shift 2 ;;
+      --target) target="$2"; shift 2 ;;
       *) die "init: unknown argument $1" ;;
     esac
   done
@@ -68,7 +70,7 @@ cmd_init() {
     max_plan=$(shepherd_config max_plan_reviews)
     jq -n \
       --arg branch "$(shepherd_branch)" \
-      --arg target "$(shepherd_target_branch)" \
+      --arg target "${target:-$(shepherd_target_branch)}" \
       --arg issue "$issue" --arg pr "$pr" \
       --arg kind "$kind" --arg ref "$ref" --arg url "$url" \
       --argjson max "${max:-3}" --argjson max_plan "${max_plan:-2}" \
@@ -595,5 +597,5 @@ case "$sub" in
   wait-review) cmd_wait_review "$@" ;;
   diagnose|propose) guarded_session "$sub" "$@" ;;
   fleet) cmd_fleet "$@" ;;
-  *) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

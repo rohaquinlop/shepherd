@@ -23,6 +23,8 @@
 SHEPHERD_ACTIVE_PHASES="study implement review push triage"
 SHEPHERD_WAIT_PHASES="waiting_reviewer waiting_ci waiting_review waiting_user done"
 SHEPHERD_MAX_STOP_BLOCKS=3
+SHEPHERD_LEAD_ACTIVE_PHASES="dispatching triage verifying"
+SHEPHERD_LEAD_WAIT_PHASES="waiting_fleet waiting_user done"
 
 shepherd_root() { git rev-parse --show-toplevel 2>/dev/null; }
 

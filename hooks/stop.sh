@@ -8,12 +8,29 @@
 # resets the counter, so a stuck loop ends instead of spinning.
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/fleet.sh"
 
 command -v jq >/dev/null || exit 0
 
 input=$(cat)
 cwd=$(jq -r '.cwd // empty' <<<"$input")
 [[ -n "$cwd" ]] && cd "$cwd" 2>/dev/null
+
+if lead=$(fleet_lead_record); then
+  phase=$(jq -r .lead.phase "$lead")
+  if shepherd_in_list "$phase" "$SHEPHERD_LEAD_ACTIVE_PHASES" \
+    && (( $(jq -r '.lead.stop_blocks // 0' "$lead") < SHEPHERD_MAX_STOP_BLOCKS )); then
+    jq '.lead.stop_blocks = ((.lead.stop_blocks // 0) + 1)' "$lead" >"$lead.tmp" && mv "$lead.tmp" "$lead"
+    case "$phase" in
+      dispatching) next="run \`shepherd fleet next\`, then start \`shepherd fleet wait\` in the background and set \`fleet lead waiting_fleet\`" ;;
+      triage) next="handle every changed slice (settle or ask its question, start unblocked slices, report stalls), then wait again" ;;
+      verifying) next="finish the goal review and settle its findings, then set \`fleet lead done\`" ;;
+    esac
+    reason="shepherd lead phase is '$phase'; the fleet is not at a stopping point. Next: $next. If you need the user, run \`shepherd fleet lead waiting_user\` and ask one question."
+    jq -n --arg r "$reason" '{decision: "block", reason: $r}'
+    exit 0
+  fi
+fi
 
 shepherd_is_active || exit 0
 

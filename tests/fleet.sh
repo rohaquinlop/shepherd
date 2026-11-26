@@ -2,7 +2,7 @@
 # shepherd fleet on a throwaway repo, with fake `claude` and `gh` on PATH.
 # usage: bash tests/fleet.sh [shepherd checkout]   (default: this checkout)
 set -u
-REPO="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"; CLI="$REPO/scripts/shepherd.sh"
+REPO="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"; CLI="$REPO/scripts/shepherd.sh"; HOOKS="$REPO/hooks"
 T=$(cd "$(mktemp -d)" && pwd -P); pass=0; fail=0
 ok() { if eval "$2"; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }
 sh() { (cd "$1" && shift && bash "$CLI" "$@"); }
@@ -89,6 +89,19 @@ ok "answer stops, then resumes in the worktree" '[[ "$(cut -f2 "$FAKE/claude.log
 : > "$FAKE/claude.log"
 ok "answer fails when claude agents fails, without resuming" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet answer 4 "$T/answer.txt" 2>/dev/null && ! grep -q -- "--resume" "$FAKE/claude.log"'
 ok "stop fails when claude agents fails" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet stop >/dev/null 2>&1'
+ok "self names the slice of its worktree" '[[ "$(sh "$(wt 2)" fleet self | jq -c "[.slug, .slice, .base]")" == '"'"'["plan",2,"fleet/plan/slice-1"]'"'"' ]]'
+ok "self fails outside a slice worktree" '! sh "$A" fleet self >/dev/null 2>&1'
+hook() { jq -n --arg cwd "$1" '{cwd: $cwd}' | bash "$HOOKS/$2"; }
+sh "$A" fleet lead dispatching
+ok "stop hook blocks an active lead phase" 'hook "$A" stop.sh | jq -e ".decision == \"block\" and (.reason | test(\"lead phase is .dispatching.\"))" >/dev/null'
+hook "$A" stop.sh >/dev/null; hook "$A" stop.sh >/dev/null
+ok "stop hook gives up after the cap" '[[ -z "$(hook "$A" stop.sh)" ]]'
+sh "$A" fleet lead waiting_fleet
+ok "stop hook lets waiting_fleet end the turn" '[[ -z "$(hook "$A" stop.sh)" ]]'
+ok "session start names the active lead" 'hook "$A" session-start.sh | jq -r .hookSpecificOutput.additionalContext | grep -q "shepherd lead is active .* fleet .plan. (phase: waiting_fleet)"'
+sh "$A" fleet lead done
+ok "a done lead is silent" '[[ -z "$(hook "$A" stop.sh)" && -z "$(hook "$A" session-start.sh)" ]]'
+ok "lead refuses an unknown phase" '! sh "$A" fleet lead planning 2>/dev/null'
 ok "start refuses a second run" '! sh "$A" fleet start "$P" 2>/dev/null'
 
 ok "status fails without a fleet record" '(cd "$T" && git init -q -b main b) && ! out=$(sh "$T/b" fleet status 2>/dev/null) && [[ -z "$out" ]]'
@@ -99,6 +112,9 @@ printf '### slice-1: x\n- **Depends on:** slice-9\n- **Files:** `a`\n' > "$T/bad
 ok "unknown dependency refused, no record" '! sh "$C" fleet start "$T/bad.md" 2>/dev/null && [[ ! -e "$C/.git/shepherd/_fleet/bad.json" ]]'
 printf '### slice-1: x\n- **Depends on:** none\n- **Files:** `a`\n' > "$T/one.md"
 ok "failed session start leaves no worktree or branch" '! FAKE_FAIL_BG=1 sh "$C" fleet start "$T/one.md" 2>/dev/null && [[ $(git -C "$C" worktree list | wc -l) -eq 1 ]] && [[ -z "$(git -C "$C" branch --list "fleet/*")" ]]'
+git -C "$C" switch -q -c feat/t
+ok "init --target sets the PR base" '[[ "$(jq -r .target_branch "$(sh "$C" init --target fleet/plan/slice-1)/state.json")" == fleet/plan/slice-1 ]]'
+git -C "$C" switch -q main
 ok "next succeeds after a failed start" 'sh "$C" fleet next | grep -q "dispatched slice-1"'
 
 echo "pass=$pass fail=$fail"; rm -rf "$T"
