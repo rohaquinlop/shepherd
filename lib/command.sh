@@ -110,8 +110,18 @@ _shepherd_emit() {
       w=("${w[@]:1}"); continue
     fi
     case "${w[0]##*/}" in
-      if | then | else | elif | do | while | until | '{' | '!' | exec | nohup | builtin)
+      if | then | else | elif | do | while | until | select | coproc | '{' | '!' | nohup | builtin)
         w=("${w[@]:1}") ;;
+      function)
+        w=("${w[@]:2}") ;;
+      exec)
+        w=("${w[@]:1}")
+        while [[ "${w[0]:-}" == -* ]]; do
+          case "${w[0]}" in
+            -a) w=("${w[@]:2}") ;;
+            *) w=("${w[@]:1}") ;;
+          esac
+        done ;;
       eval)
         _shepherd_split "${w[*]:1}" $((depth + 1)); return 0 ;;
       command | time | nice)

@@ -3,9 +3,10 @@
 # command in the call (see lib/command.sh):
 #   - deny `gh pr merge` and `gh api` merge writes: shepherd never merges
 #   - deny force pushes: they discard what reviewers already read
-#   - deny `git push --no-verify`, `git -c core.hooksPath=…`, and a push in a
-#     call that names GIT_CONFIG*: they can skip the git pre-push gate
-#     (hooks/git-pre-push.sh)
+#   - deny a call whose text names a push and `--no-verify`, `core.hooksPath`,
+#     or GIT_CONFIG*: they can skip the git pre-push gate
+#     (hooks/git-pre-push.sh). Read from the raw text, so a push the splitter
+#     does not recognize (`$g push`, `$(command -v git) push`) is still caught
 #   - deny `git push` unless the worktree is clean and HEAD's tree is the tree
 #     the review gate cleared (see `shepherd clear`)
 # Every other command, and every branch without state, passes through.
@@ -94,9 +95,12 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
   fi
 done
 
-(( push || merge )) || exit 0
+lower=$(tr '[:upper:]' '[:lower:]' <<<"$cmd")
+[[ "$lower" == *push* && ( "$lower" == *--no-v* || "$lower" == *git_config* || "$lower" == *hookspath* ) ]] && bypass=1 || bypass=0
+
+(( push || merge || bypass )) || exit 0
 shepherd_is_active || exit 0
-(( push )) && [[ -z "$reason" && "$cmd" == *GIT_CONFIG* ]] && reason=$VERIFY_REASON
+(( bypass )) && [[ -z "$reason" ]] && reason=$VERIFY_REASON
 
 (( merge )) && deny "$MERGE_REASON"
 [[ -n "$reason" ]] && deny "$reason"

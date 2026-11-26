@@ -51,7 +51,9 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   $'export GIT_CONFIG_PARAMETERS=x\ngit push origin feat/x' 'if true; then git push --no-verify origin feat/x; fi' \
   '{ git push -f origin feat/x; }' '! git push -f origin feat/x' 'echo origin | xargs -n 1 git push -f' \
   'eval "git push --no-verify origin feat/x"' 'nohup git push -f origin feat/x' 'timeout -s KILL 5 git push -f' \
-  'while true; do gh pr merge 1; done'; do
+  'while true; do gh pr merge 1; done' 'function f { git push -f origin feat/x; }; f' 'exec -a g git push -f' \
+  '$(command -v git) push --no-verify origin feat/x' 'g=git; $g push --no-verify origin feat/x' \
+  'GIT_CONFIG_COUNT=1 $(command -v git) push origin feat/x'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 ok "push then rm -f is not a force push" '! denied "git push origin feat/x && rm -f x"'
