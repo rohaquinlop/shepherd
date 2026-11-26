@@ -8,7 +8,7 @@ argument-hint: "<goal, issue, Jira key, or docs/proposals/<file>.md>"
 
 Coordinate, do not implement. Each slice is implemented, reviewed, and pushed by its own `/shepherd:run` session in its own worktree. The fleet commands give you the facts (who is running, waiting, ready, merged); you give the judgment (what to split, how to settle a question, when to re-plan).
 
-The CLI is `../../scripts/shepherd.sh` relative to this skill's base directory. `$SHEPHERD` below means its absolute path; write it out in every call. Run it from the repository root of the main checkout.
+The CLI is `../../scripts/shepherd.sh` relative to this skill's base directory. `$SHEPHERD` below means its absolute path; write it out in every call. Run it from the repository root of the main checkout. When the repository has more than one fleet, add `--fleet <slug>` (the proposal's file name without `.md`) after the subcommand of every fleet call except `start`.
 
 ## Phases
 
@@ -41,13 +41,13 @@ Set the phase with `$SHEPHERD fleet lead <phase>` before each change. The Stop h
 If `fleet wait` timed out with no change, start it again and end the turn. Otherwise `$SHEPHERD fleet lead triage`, then read `$SHEPHERD fleet status --json` and handle each slice by category. The `fleet wait` output names the slices that changed (`slice-N: <old> -> <new>`):
 
 - **input** (phase `waiting_user`): read its `question`. If it is empty, read the slice's `decisions.md` (in the state dir that `cd <branch's worktree> && $SHEPHERD dir` prints) and `claude logs <session prefix>` to find what it asked. Settle it with the decide-by-default rules in the run skill, plus the proposal's decisions and rules. If settled, write the answer and what settled it to a file, `$SHEPHERD fleet answer <N> <file>`, and add a row to the proposal's **Decisions**. If not, `$SHEPHERD fleet lead waiting_user` and ask the user **one** question: the slice, its question, what you checked, the options, and your recommendation. When the user answers, forward it with `fleet answer` the same way, add it to **Decisions**, then re-arm (step 2.3): the user's answer does not wake the fleet.
-- **ready**: nothing to do until it merges.
+- **ready**: `$SHEPHERD fleet next`: a slice that depends on it can now start, stacked on its branch.
 - **merged**: `$SHEPHERD fleet next` to start slices it unblocked.
 - **Stacked on a merged slice**: a slice in **input** or **ready** whose `base` is the `branch` of a **merged** row must move to the fleet's target branch. Tell it with `fleet answer` (with its answer, if it has a question) to merge the target branch, retarget its PR (`gh pr edit <pr> --base <target>`, with `target` from its status row), and review against it (`$SHEPHERD set target_branch=<target>`), then `$SHEPHERD fleet base <N> <target>`. Leave a **running** slice alone: stopping it can cut off an edit; it is handled when it next stops.
 - **stalled**: report it to the user with `claude attach` and `claude logs`; do not restart it yourself.
 - **running**, **pending**: nothing.
 
-Re-plan when a slice reports work its scope does not cover: add a new `### slice-N:` to the proposal with its dependencies, files, and tests, then `fleet next`. Never widen a running slice.
+Re-plan when a slice reports work its scope does not cover: add a new `### slice-N:` to the proposal with its dependencies, files, and tests, then `fleet next`, which adds it to the fleet record and starts it when it is free. Never widen a running slice.
 
 Then re-arm (step 2.3). The first time every slice is ready or merged, report first (step 4).
 

@@ -75,9 +75,9 @@ ok "status ranks ready, input, stalled, pending" '[[ "$(order)" == "[1,4,2,3]" ]
 ok "status rows carry the fleet target" '[[ "$(sh "$A" fleet status --json | jq -r "[.[].target] | unique | join(\",\")")" == main ]]'
 ok "status shows the question" '[[ "$(sh "$A" fleet status --json | jq -r ".[] | select(.slice == 4) | .question")" == which ]]'
 
-(sleep 2; sh "$(wt 4)" set phase=implement) &
-w=$(sh "$A" fleet wait --timeout 10); wait
-ok "wait reports the change" '[[ "$w" == "slice-4: input/waiting_user -> running/implement" ]]'
+(sleep 1; sh "$(wt 4)" set phase=implement) &
+w=$(sh "$A" fleet wait --timeout 3); wait
+ok "wait stays quiet when a slice goes back to running" '[[ "$w" == "no fleet change after 3s" ]]'
 
 sh "$(wt 4)" set phase=waiting_user
 ok "a change between two waits is reported at once" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: running/implement -> input/waiting_user" ]]'
@@ -88,6 +88,12 @@ sh "$A" fleet next >/dev/null
 ok "next starts a slice once the overlap merged" '[[ "$(jq -r ".slices[\"3\"].base" "$rec")" == main ]]'
 agents "{\"$(sess 1)\":\"done\",\"$(sess 4)\":\"done\",\"$(sess 2)\":\"blocked\",\"$(sess 3)\":\"busy\"}"
 ok "wait skips the lead's own dispatch" '[[ "$(sh "$A" fleet wait --timeout 0)" != *slice-3* ]]'
+printf '### slice-5: added\n- **Depends on:** slice-3\n- **Files:** `e.sh`\n' >> "$P"
+sh "$A" fleet next >/dev/null
+ok "next adds a slice appended by a re-plan" '[[ "$(jq -c ".slices[\"5\"] | [.title, .depends]" "$rec")" == '"'"'["added",[3]]'"'"' && "$(jq -r ".slices[\"3\"].session" "$rec")" != null ]]'
+printf '### slice-6: bad\n- **Depends on:** slice-9\n- **Files:** `f.sh`\n' >> "$P"
+ok "next refuses a re-plan with an unknown dependency" '! sh "$A" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"6\"]" "$rec")" == null ]]'
+sed -i '' '/^### slice-6/,$d' "$P"
 
 echo "use option b" > "$T/answer.txt"
 : > "$FAKE/claude.log"

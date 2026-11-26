@@ -156,8 +156,32 @@ fleet_dispatch() {
   echo "dispatched slice-$n on $base ($wt)"
 }
 
+# A proposal's slices as a record's `.slices` object, none started.
+fleet_slices() {
+  fleet_parse "$1" | jq -Rn '
+    [inputs | split("\t") | {key: .[0], value: {
+      title: .[1],
+      depends: (if .[2] == "" then [] else (.[2] | split(",") | map(tonumber)) end),
+      files: (if .[3] == "" then [] else (.[3] | split(",")) end),
+      base: null, branch: null, worktree: null, session: null}}] | from_entries'
+}
+
+fleet_missing() {
+  jq -r '(keys) as $k | [.[].depends[] | tostring | select(. as $d | $k | index($d) | not)] | unique | map("slice-" + .) | join(", ")' <<<"$1"
+}
+
+# Adds the slices a re-plan appended to the proposal; started slices stay as recorded.
+fleet_sync() {
+  local record="$1" slices missing
+  slices=$(fleet_slices "$(jq -r .proposal "$record")") || die "cannot read the proposal"
+  missing=$(fleet_missing "$(jq --argjson s "$slices" '$s + .slices' "$record")")
+  [[ -z "$missing" ]] || die "unknown dependency: $missing"
+  fleet_write "$record" --argjson s "$slices" '.slices = $s + .slices' || die "cannot write the fleet record"
+}
+
 fleet_next() {
   local record="$1" max target rows n base active dispatched=0
+  fleet_sync "$record"
   max=$(jq -r '.max // 3' "$record")
   target=$(jq -r .target "$record")
   git fetch -q origin 2>/dev/null
@@ -178,7 +202,7 @@ fleet_next() {
 }
 
 fleet_start() {
-  local proposal="$1" max=3 slug record dir parsed missing
+  local proposal="$1" max=3 slug record dir slices missing
   shift
   [[ "$1" == "--max" && -n "$2" ]] && max="$2"
   [[ -f "$proposal" ]] || die "fleet start <proposal> [--max N]"
@@ -187,21 +211,15 @@ fleet_start() {
   dir=$(fleet_dir)
   record="$dir/$slug.json"
   [[ -f "$record" ]] && die "fleet '$slug' already started; use \`shepherd fleet next\`"
-  parsed=$(fleet_parse "$proposal")
-  [[ -n "$parsed" ]] || die "no \`### slice-N:\` sections in $proposal"
+  slices=$(fleet_slices "$proposal")
+  [[ "$slices" != "{}" ]] || die "no \`### slice-N:\` sections in $proposal"
+  missing=$(fleet_missing "$slices")
+  [[ -z "$missing" ]] || die "unknown dependency: $missing"
   mkdir -p "$dir/worktrees"
-  jq -Rn --arg slug "$slug" --arg proposal "$proposal" --arg target "$(shepherd_target_branch)" \
-    --argjson max "$max" --arg now "$(shepherd_now)" '
-    {slug: $slug, proposal: $proposal, target: $target, max: $max, created: $now,
-     slices: ([inputs | split("\t") | {key: .[0], value: {
-       title: .[1],
-       depends: (if .[2] == "" then [] else (.[2] | split(",") | map(tonumber)) end),
-       files: (if .[3] == "" then [] else (.[3] | split(",")) end),
-       base: null, branch: null, worktree: null, session: null}}] | from_entries)}
-  ' <<<"$parsed" >"$record.tmp" || die "cannot write the fleet record"
-  missing=$(jq -r '(.slices | keys) as $k | [.slices[].depends[] | tostring | select(. as $d | $k | index($d) | not)] | unique | map("slice-" + .) | join(", ")' "$record.tmp")
-  [[ -z "$missing" ]] || { rm -f "$record.tmp"; die "unknown dependency: $missing"; }
-  mv "$record.tmp" "$record"
+  jq -n --arg slug "$slug" --arg proposal "$proposal" --arg target "$(shepherd_target_branch)" \
+    --argjson max "$max" --arg now "$(shepherd_now)" --argjson slices "$slices" \
+    '{slug: $slug, proposal: $proposal, target: $target, max: $max, created: $now, slices: $slices}' \
+    >"$record.tmp" && mv "$record.tmp" "$record" || die "cannot write the fleet record"
   fleet_next "$record"
 }
 
@@ -231,12 +249,14 @@ fleet_wait() {
     now_rows=$(snapshot) || exit 1
     changed=$(jq -rn --argjson a "$seen" --argjson b "$now_rows" '
       [$b[] as $r | (first($a[] | select(.slice == $r.slice)) // {category: "new"}) as $o | select($o != $r)
-       | select(($o.category == "pending" or $o.category == "new") and $r.category == "running" | not)
        | "slice-\($r.slice): \($o.category)/\($o.phase // "-") -> \($r.category)/\($r.phase // "-")"] | .[]')
     if [[ -n "$changed" ]]; then
-      fleet_save_seen "$record" "$now_rows"
-      echo "$changed"
-      return 0
+      seen=$now_rows
+      fleet_save_seen "$record" "$seen"
+      # The lead acts on no slice that is running or pending, and its own
+      # dispatches and answers produce exactly those changes.
+      changed=$(grep -Ev ' -> (running|pending)/' <<<"$changed")
+      [[ -n "$changed" ]] && { echo "$changed"; return 0; }
     fi
     (( SECONDS - now < timeout )) || break
     sleep "$interval"
