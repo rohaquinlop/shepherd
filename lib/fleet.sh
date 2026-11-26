@@ -154,7 +154,7 @@ fleet_dispatch() {
   fi
   if ! (cd "$wt" && claude --bg -n "shepherd-$slug-slice-$n" --session-id "$session" "/shepherd:run $proposal#slice-$n" >/dev/null); then
     fleet_write "$record" --arg n "$n" '.slices[$n] += {base: null, branch: null, worktree: null, session: null}' \
-      || echo "shepherd: slice-$n still names session ${session:0:8} in the fleet record" >&2
+      || echo "shepherd: set .slices[\"$n\"].base, .branch, .worktree, and .session to null in $record, or slice-$n never starts" >&2
     git worktree remove --force "$wt"
     git branch -D -q "$branch"
     die "cannot start the session for slice-$n"
