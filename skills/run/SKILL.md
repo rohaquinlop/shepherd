@@ -48,8 +48,10 @@ Before every phase change, run `$SHEPHERD set phase=<phase>`.
 
 ## 0. Start or resume
 
-- If `$SHEPHERD diagnose status` shows an active diagnosis, stop: its guard blocks every edit. Tell
-  the user to finish it with `shepherd:diagnose` (which ends it) or to run `$SHEPHERD diagnose end`.
+- If `$SHEPHERD diagnose status` shows an active diagnosis, or `$SHEPHERD propose status` shows an
+  active proposal, stop: its guard blocks every edit. Tell the user to finish it with
+  `shepherd:diagnose` or `shepherd:propose` (which ends it), or to run `$SHEPHERD diagnose end` or
+  `$SHEPHERD propose end`.
 - If `$SHEPHERD status` succeeds, this branch already has state: read `brief.md` and
   `decisions.md` in the state dir, then continue from the recorded phase. Do not redo finished stages.
 - Otherwise parse the argument:
@@ -57,6 +59,14 @@ Before every phase change, run `$SHEPHERD set phase=<phase>`.
     reproduction, fix direction, and acceptance criteria are the starting brief. If its status is
     not `root cause confirmed`, the study stage must confirm the cause first. Copy it to
     `source.md`, and use the ticket it names, if any, as `--issue` or `--jira`.
+  - Proposal write-up (a path under `docs/proposals/`, optionally ending in `#slice-N`) → read it.
+    Its verdict must be `feasible` or `feasible with conditions`; otherwise stop and report the
+    verdict. With `#slice-N`, the source is the `### slice-N:` section plus the proposal's rules,
+    impact map, decisions, and recommendation; check that every slice it depends on is done (its
+    acceptance tests exist and pass on the target branch), else stop and name the missing slice. Without an anchor, the source is every
+    slice. Its acceptance criteria are the starting brief, and its decisions are settled: record
+    them with `$SHEPHERD decision` instead of asking again. Copy it to `source.md`, and use the
+    ticket it names, if any, as `--issue` or `--jira`.
   - GitHub issue (a number, `#N`, or a github.com issue URL) →
     `gh issue view <N> --json title,body,comments,labels,state`
   - GitHub PR → `gh pr view <N> --json title,body,headRefName,comments,reviews`, check out its
