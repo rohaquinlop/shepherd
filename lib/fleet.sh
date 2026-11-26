@@ -156,7 +156,6 @@ fleet_dispatch() {
   echo "dispatched slice-$n on $base ($wt)"
 }
 
-# A proposal's slices as a record's `.slices` object, none started.
 fleet_slices() {
   fleet_parse "$1" | jq -Rn '
     [inputs | split("\t") | {key: .[0], value: {
@@ -170,8 +169,7 @@ fleet_missing() {
   jq -r '(keys) as $k | [.[].depends[] | tostring | select(. as $d | $k | index($d) | not)] | unique | map("slice-" + .) | join(", ")' <<<"$1"
 }
 
-# Takes a re-plan from the proposal: new slices, and edits to slices that have
-# not started. A started slice stays as recorded.
+# A started slice stays as recorded: its session has already read the proposal.
 fleet_sync() {
   local record="$1" proposal slices missing
   proposal=$(jq -r .proposal "$record")
@@ -244,7 +242,7 @@ fleet_status() {
 # first wait compares against nothing, so it reports a slice already waiting.
 fleet_wait() {
   local record="$1" timeout="${2:-1800}" interval="${SHEPHERD_FLEET_INTERVAL:-30}" seen now now_rows changed
-  snapshot() { local rows; rows=$(fleet_rows "$record") || exit 1; jq -c 'map({slice, category, phase, pr}) | sort_by(.slice)' <<<"$rows"; }
+  snapshot() { local rows; rows=$(fleet_rows "$record") || exit 1; jq -c 'map({slice, category, phase, pr, question}) | sort_by(.slice)' <<<"$rows"; }
   seen=$(jq -c '.seen // []' "$record")
   now=$SECONDS
   while :; do
@@ -286,10 +284,6 @@ fleet_answer() {
   [[ -n "$session" && -d "$wt" ]] || die "slice-$n has no session"
   # Resuming a live session copies it into the caller's cwd, so stop it first
   # and resume from its own worktree.
-  # The answered slice runs again; mark it so before the halt, or a new
-  # question from it before the next wait would match the old one in `.seen`.
-  fleet_write "$record" --argjson n "$n" '.seen |= (if . == null then . else map(if .slice == $n then .category = "running" else . end) end)' \
-    || die "cannot write the fleet record"
   fleet_halt "$session"
   (cd "$wt" && claude --bg --resume "$session" "$(cat "$file")" >/dev/null) || die "cannot resume slice-$n"
   echo "answered slice-$n"
@@ -304,23 +298,18 @@ fleet_stop() {
   done
 }
 
-# First fleet record for which the jq filter holds; $r is this checkout's root.
 fleet_find() {
-  local root file
+  local filter="$1" root file
+  shift
   root=$(shepherd_root) || return 1
   for file in "$(fleet_dir)"/*.json; do
     [[ -f "$file" ]] || continue
-    jq -e --arg r "$root" "$1" "$file" >/dev/null && { printf '%s' "$file"; return 0; }
+    jq -e --arg r "$root" "$@" "$filter" "$file" >/dev/null && { printf '%s' "$file"; return 0; }
   done
   return 1
 }
 
-# The fleet record whose lead is session $1, runs in this checkout, and is not done.
-fleet_lead_record() {
-  local file
-  file=$(fleet_find '.lead.root == $r and .lead.phase != "done"') || return 1
-  jq -e --arg s "$1" '.lead.session == $s' "$file" >/dev/null && printf '%s' "$file"
-}
+fleet_lead_record() { fleet_find '.lead.root == $r and .lead.phase != "done" and .lead.session == $s' --arg s "$1"; }
 
 fleet_lead() {
   local record="$1" phase="$2"

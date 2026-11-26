@@ -41,7 +41,7 @@ For a goal bigger than one PR (an idea, an issue, a whole Jira story), start wit
 
 propose (slices with dependencies and files) → `shepherd.sh fleet start` (one `/shepherd:run` session per ready slice, each in its own worktree, stacked on its dependency's branch) → background `fleet wait` → settle each slice's question from evidence, or ask you → start unblocked slices → report the merge queue
 
-The lead never implements or merges. Slice sessions run in the background with your permission mode, so they need the allowlist below, or they stall on a prompt; `shepherd.sh fleet status` shows a stalled slice, and `claude attach <id>` opens it.
+The lead never implements or merges. Slice sessions run in the background with your permission mode, so they need the allowlist below, or they stall on a prompt; `shepherd.sh fleet status` shows a stalled slice, and `claude attach <id>` opens it. The lead's Stop hook and resume note follow the session that last set its phase; after `/clear` or a restart, run `/shepherd:lead <proposal>` again to resume.
 
 ## Propose before you build
 

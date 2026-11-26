@@ -110,7 +110,9 @@ ok "answer stops, then resumes in the worktree" '[[ "$(cut -f2 "$FAKE/claude.log
 ok "answer fails when claude agents fails, without resuming" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet answer 4 "$T/answer.txt" 2>/dev/null && ! grep -q -- "--resume" "$FAKE/claude.log"'
 sh "$(wt 4)" set phase=waiting_user; sh "$A" fleet wait --timeout 0 >/dev/null
 sh "$A" fleet answer 4 "$T/answer.txt" >/dev/null
-ok "a question asked again after an answer wakes the lead" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: running/waiting_user -> input/waiting_user" ]]'
+ok "the answered question stays quiet" '! sh "$A" fleet wait --timeout 0 >/dev/null'
+sh "$(wt 4)" set question=again
+ok "a new question after an answer wakes the lead" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: input/waiting_user -> input/waiting_user" ]]'
 ok "status takes --fleet after the subcommand" 'sh "$A" fleet status --fleet plan --json | jq -e "length > 0" >/dev/null'
 ok "stop fails when claude agents fails" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet stop >/dev/null 2>&1'
 ok "self names the slice of its worktree" '[[ "$(sh "$(wt 2)" fleet self | jq -c "[.slug, .slice, .base]")" == '"'"'["plan",2,"fleet/plan/slice-1"]'"'"' ]]'

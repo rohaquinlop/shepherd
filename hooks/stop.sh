@@ -19,15 +19,17 @@ cwd=$(jq -r '.cwd // empty' <<<"$input")
 
 if lead=$(fleet_lead_record "$(jq -r '.session_id // empty' <<<"$input")"); then
   phase=$(jq -r .lead.phase "$lead")
+  slug=$(jq -r .slug "$lead")
+  lead_cli="$cli fleet lead --fleet $slug"
   if shepherd_in_list "$phase" "$SHEPHERD_LEAD_ACTIVE_PHASES" \
     && (( $(jq -r '.lead.stop_blocks // 0' "$lead") < SHEPHERD_MAX_STOP_BLOCKS )) \
     && fleet_write "$lead" '.lead.stop_blocks = ((.lead.stop_blocks // 0) + 1)'; then
     case "$phase" in
-      dispatching) next="set \`$cli fleet lead waiting_fleet\`, then start \`$cli fleet wait\` in the background and end the turn" ;;
-      triage) next="handle every changed slice (settle or ask its question, start unblocked slices, report stalls), then set \`$cli fleet lead waiting_fleet\` and start \`$cli fleet wait\` in the background" ;;
-      verifying) next="finish checking the slices against the goal, then set \`$cli fleet lead done\`" ;;
+      dispatching) next="set \`$lead_cli waiting_fleet\`, then start \`$cli fleet wait --fleet $slug\` in the background and end the turn" ;;
+      triage) next="handle every changed slice (settle or ask its question, start unblocked slices, report stalls), then set \`$lead_cli waiting_fleet\` and start \`$cli fleet wait --fleet $slug\` in the background" ;;
+      verifying) next="finish checking the slices against the goal, then set \`$lead_cli done\`" ;;
     esac
-    reason="shepherd lead phase is '$phase'; the fleet is not at a stopping point. Next: $next. If you need the user, run \`$cli fleet lead waiting_user\` and ask one question."
+    reason="shepherd lead phase is '$phase'; the fleet is not at a stopping point. Next: $next. If you need the user, run \`$lead_cli waiting_user\` and ask one question."
     jq -n --arg r "$reason" '{decision: "block", reason: $r}'
     exit 0
   fi
