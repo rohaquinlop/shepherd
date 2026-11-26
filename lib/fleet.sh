@@ -204,21 +204,44 @@ fleet_status() {
     (if .pr then "#" + (.pr | tostring) else "-" end), (.branch // "-"), (.question // "")] | @tsv' <<<"$rows"
 }
 
+# Compares against the snapshot the last wait saw (`.seen` in the record), so a
+# change made while the lead was busy between two waits is still reported.
 fleet_wait() {
-  local record="$1" timeout="${2:-1800}" interval="${SHEPHERD_FLEET_INTERVAL:-30}" start now now_rows changed
+  local record="$1" timeout="${2:-1800}" interval="${SHEPHERD_FLEET_INTERVAL:-30}" seen now now_rows changed
   snapshot() { local rows; rows=$(fleet_rows "$record") || exit 1; jq -c 'map({slice, category, phase, pr}) | sort_by(.slice)' <<<"$rows"; }
-  start=$(snapshot) || exit 1
+  seen=$(jq -c '.seen // empty' "$record")
+  if [[ -z "$seen" ]]; then
+    seen=$(snapshot) || exit 1
+    fleet_save_seen "$record" "$seen"
+  fi
   now=$SECONDS
-  while (( SECONDS - now < timeout )); do
-    sleep "$interval"
+  while :; do
     now_rows=$(snapshot) || exit 1
-    changed=$(jq -rn --argjson a "$start" --argjson b "$now_rows" '
-      [$b[] as $r | ($a[] | select(.slice == $r.slice)) as $o | select($o != $r)
+    changed=$(jq -rn --argjson a "$seen" --argjson b "$now_rows" '
+      [$b[] as $r | (first($a[] | select(.slice == $r.slice)) // {category: "new"}) as $o | select($o != $r)
        | "slice-\($r.slice): \($o.category)/\($o.phase // "-") -> \($r.category)/\($r.phase // "-")"] | .[]')
-    [[ -n "$changed" ]] && { echo "$changed"; return 0; }
+    if [[ -n "$changed" ]]; then
+      fleet_save_seen "$record" "$now_rows"
+      echo "$changed"
+      return 0
+    fi
+    (( SECONDS - now < timeout )) || break
+    sleep "$interval"
   done
   echo "no fleet change after ${timeout}s"
   exit 3
+}
+
+fleet_save_seen() {
+  jq --argjson seen "$2" '.seen = $seen' "$1" >"$1.tmp" && mv "$1.tmp" "$1" || die "cannot write the fleet record"
+}
+
+fleet_set_base() {
+  local record="$1" n="$2" base="$3"
+  [[ -n "$n" && -n "$base" ]] || die "fleet base <slice> <branch>"
+  jq -e --arg n "$n" '.slices[$n].session != null' "$record" >/dev/null || die "slice-$n has not started"
+  jq --arg n "$n" --arg base "$base" '.slices[$n].base = $base' "$record" >"$record.tmp" \
+    && mv "$record.tmp" "$record" || die "cannot write the fleet record"
 }
 
 fleet_answer() {
@@ -282,7 +305,7 @@ cmd_fleet() {
   [[ "$sub" == self ]] && { fleet_self; return; }
   if [[ "$1" == "--fleet" ]]; then slug="$2"; shift 2; fi
   case "$sub" in
-    status|wait|next|answer|stop|lead) record=$(fleet_record "$slug") || exit 1 ;;
+    status|wait|next|answer|stop|lead|base) record=$(fleet_record "$slug") || exit 1 ;;
   esac
   case "$sub" in
     status) fleet_status "$record" "$1" ;;
@@ -291,6 +314,7 @@ cmd_fleet() {
     answer) fleet_answer "$record" "$@" ;;
     stop) fleet_stop "$record" ;;
     lead) fleet_lead "$record" "$1" ;;
-    *) die "fleet start <proposal> [--max N] | [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | stop | lead PHASE | self" ;;
+    base) fleet_set_base "$record" "$@" ;;
+    *) die "fleet start <proposal> [--max N] | [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | base N BRANCH | stop | lead PHASE | self" ;;
   esac
 }

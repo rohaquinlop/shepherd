@@ -24,7 +24,8 @@
 #   diagnose start --slug SLUG | status | end   diagnosis write-up, scratch dir, edit guard
 #   propose start --slug SLUG | status | end    proposal write-up, scratch dir, same edit guard
 #   fleet start PROPOSAL [--max N]     start a session per ready slice, each in its own worktree
-#   fleet [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | stop | lead PHASE
+#   fleet [--fleet SLUG] status [--json] | wait [--timeout S] | next | answer N FILE | base N BRANCH
+#                                      | stop | lead PHASE
 #   fleet self                         this worktree's slice: slug, slice, base, target
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/state.sh"
@@ -597,5 +598,5 @@ case "$sub" in
   wait-review) cmd_wait_review "$@" ;;
   diagnose|propose) guarded_session "$sub" "$@" ;;
   fleet) cmd_fleet "$@" ;;
-  *) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

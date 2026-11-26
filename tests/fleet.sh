@@ -79,6 +79,10 @@ ok "status shows the question" '[[ "$(sh "$A" fleet status --json | jq -r ".[] |
 w=$(sh "$A" fleet wait --timeout 10); wait
 ok "wait reports the change" '[[ "$w" == "slice-4: input/waiting_user -> running/implement" ]]'
 
+sh "$(wt 4)" set phase=waiting_user
+ok "a change between two waits is reported at once" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: running/implement -> input/waiting_user" ]]'
+ok "an unchanged fleet times out" '! sh "$A" fleet wait --timeout 0 >/dev/null'
+sh "$(wt 4)" set phase=implement
 echo MERGED > "$FAKE/pr-11"
 sh "$A" fleet next >/dev/null
 ok "next starts a slice once the overlap merged" '[[ "$(jq -r ".slices[\"3\"].base" "$rec")" == main ]]'
@@ -92,6 +96,9 @@ ok "answer fails when claude agents fails, without resuming" '! FAKE_FAIL_AGENTS
 ok "stop fails when claude agents fails" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet stop >/dev/null 2>&1'
 ok "self names the slice of its worktree" '[[ "$(sh "$(wt 2)" fleet self | jq -c "[.slug, .slice, .base]")" == '"'"'["plan",2,"fleet/plan/slice-1"]'"'"' ]]'
 ok "self fails outside a slice worktree" '! sh "$A" fleet self >/dev/null 2>&1'
+sh "$A" fleet base 2 main
+ok "base records a retargeted slice" '[[ "$(jq -r ".slices[\"2\"].base" "$rec")" == main ]]'
+ok "base refuses an unknown slice" '! sh "$A" fleet base 9 main 2>/dev/null'
 hook() { jq -n --arg cwd "$1" '{cwd: $cwd}' | bash "$HOOKS/$2"; }
 sh "$A" fleet lead dispatching
 ok "stop hook blocks an active lead phase" 'hook "$A" stop.sh | jq -e ".decision == \"block\" and (.reason | test(\"lead phase is .dispatching.\"))" >/dev/null'
