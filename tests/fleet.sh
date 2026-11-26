@@ -75,6 +75,7 @@ ok "status ranks ready, input, stalled, pending" '[[ "$(order)" == "[1,4,2,3]" ]
 ok "status rows carry the fleet target" '[[ "$(sh "$A" fleet status --json | jq -r "[.[].target] | unique | join(\",\")")" == main ]]'
 ok "status shows the question" '[[ "$(sh "$A" fleet status --json | jq -r ".[] | select(.slice == 4) | .question")" == which ]]'
 
+ok "the first wait reports a slice already waiting" '[[ "$(sh "$A" fleet wait --timeout 0)" == *"slice-4: new/- -> input/waiting_user"* ]]'
 (sleep 1; sh "$(wt 4)" set phase=implement) &
 w=$(sh "$A" fleet wait --timeout 3); wait
 ok "wait stays quiet when a slice goes back to running" '[[ "$w" == "no fleet change after 3s" ]]'

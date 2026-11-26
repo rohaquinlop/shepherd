@@ -240,15 +240,12 @@ fleet_status() {
 }
 
 # Compares against the snapshot the last wait saw (`.seen` in the record), so a
-# change made while the lead was busy between two waits is still reported.
+# change made while the lead was busy between two waits is still reported. The
+# first wait compares against nothing, so it reports a slice already waiting.
 fleet_wait() {
   local record="$1" timeout="${2:-1800}" interval="${SHEPHERD_FLEET_INTERVAL:-30}" seen now now_rows changed
   snapshot() { local rows; rows=$(fleet_rows "$record") || exit 1; jq -c 'map({slice, category, phase, pr}) | sort_by(.slice)' <<<"$rows"; }
-  seen=$(jq -c '.seen // empty' "$record")
-  if [[ -z "$seen" ]]; then
-    seen=$(snapshot) || exit 1
-    fleet_save_seen "$record" "$seen"
-  fi
+  seen=$(jq -c '.seen // []' "$record")
   now=$SECONDS
   while :; do
     now_rows=$(snapshot) || exit 1
@@ -289,12 +286,12 @@ fleet_answer() {
   [[ -n "$session" && -d "$wt" ]] || die "slice-$n has no session"
   # Resuming a live session copies it into the caller's cwd, so stop it first
   # and resume from its own worktree.
+  # The answered slice runs again; mark it so before the halt, or a new
+  # question from it before the next wait would match the old one in `.seen`.
+  fleet_write "$record" --argjson n "$n" '.seen |= (if . == null then . else map(if .slice == $n then .category = "running" else . end) end)' \
+    || die "cannot write the fleet record"
   fleet_halt "$session"
   (cd "$wt" && claude --bg --resume "$session" "$(cat "$file")" >/dev/null) || die "cannot resume slice-$n"
-  # The answered slice runs again; mark it so, or a new question from it
-  # before the next wait would match the old one in `.seen`.
-  fleet_write "$record" --argjson n "$n" '.seen |= (if . == null then . else map(if .slice == $n then .category = "running" else . end) end)' \
-    || die "slice-$n answered, but the fleet record was not updated"
   echo "answered slice-$n"
 }
 
