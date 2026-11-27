@@ -135,7 +135,7 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   "cd $scr/repo && git -C ../../.. commit -m x" "cd $scr/repo && GIT_DIR=$T/r/.git git commit -m x" \
   "git -C $scr/repo --git-dir=$T/r/.git commit -m x" "git -C $scr/nope commit -m x" "bash -c 'cd $scr/repo'; git commit -m x" \
   "git -C $scr/repo -c core.worktree=$T/r clean -fdx" "GIT_CONFIG_COUNT=1 git -C $scr/repo clean -fdx" \
-  "git -C $scr/wt clean -fdx" "git -C $scr/repo push origin main" 'gh api graphql -F query=@m.graphql' 'gh api graphql -f query="${Q}{ x }"' \
+  "git -C $scr/wt clean -fdx" "git -C $scr/repo push origin main" 'gh api graphql -F query=@m.graphql' 'gh api graphql -f query="${Q}{ x }"' 'gh api graphql -f query="query Q { $(cat m) }"' 'gh api graphql -f query="query Q { `cat m` }"' \
   'gh api graphql -f query="$(cat m.graphql)"' "$deep" 'gh pr close 1' 'gh issue create -t x' 'git branch -f x'; do
   ok "guard denies: ${c//$'\n'/\\n}" 'gdenied "$c"'
 done

@@ -134,7 +134,8 @@ git_write() {
 
 # A gh command that writes to a PR, an issue, or the API. graphql queries are
 # POSTs too, so a graphql call passes only with a literal query (`query=` and a
-# `{` in one word) and no mutation, `@file` value, or --input.
+# `{` in one word, no `$` or backtick in the call) and no mutation, `@file`
+# value, or --input.
 gh_write() {
   local a literal=0
   shepherd_gh_parse "$@"
@@ -146,7 +147,7 @@ gh_write() {
   [[ " ${SHEPHERD_GH_POS[*]} " == *" graphql "* ]] || return 0
   for a in "$@"; do
     [[ "$a" == *mutation* || "$a" == *=@* || "$a" == --input* ]] && return 0
-    [[ "$a" == query=*'{'* && "$a" != *'$'* && "$a" != *'`'* ]] && literal=1
+    [[ "$a" == query=*'{'* && "$cmd" != *'$'* && "$cmd" != *'`'* ]] && literal=1
   done
   (( ! literal ))
 }
