@@ -3,7 +3,7 @@
 # git worktree. Sourced after lib/state.sh by scripts/shepherd.sh and the hooks.
 #
 # The record lives in the common git dir, so every worktree sees the same one:
-#   shepherd/_fleet/<slug>.json        slices: title, depends, files, base, branch, worktree, session
+#   shepherd/_fleet/<slug>.json        config_dir; slices: title, depends, files, base, branch, worktree, session, dispatch
 #   shepherd/_fleet/worktrees/<slug>-slice-N/   the slice's worktree
 #
 # A dependent slice is stacked: it starts once each dependency is merged or
@@ -73,23 +73,37 @@ fleet_parse() {
   ' "$1"
 }
 
-fleet_agents() { claude agents --json --all 2>/dev/null || die "\`claude agents --json\` failed"; }
+# The lead's shell may wrap `claude` in an alias or function that sets
+# CLAUDE_CONFIG_DIR; this script sees neither, so it passes the config dir
+# recorded at `fleet start`, and `claude agents|logs|stop` see the same sessions.
+fleet_config_dir() { jq -r --arg env "${CLAUDE_CONFIG_DIR:-}" '.config_dir // $env' "$1"; }
+
+fleet_claude() {
+  local dir
+  dir=$(fleet_config_dir "$1")
+  shift
+  if [[ -n "$dir" ]]; then CLAUDE_CONFIG_DIR="$dir" command claude "$@"; else command claude "$@"; fi
+}
+
+fleet_agents() { fleet_claude "$1" agents --json --all 2>/dev/null || die "\`claude agents --json\` failed"; }
 
 fleet_live() {
   local agents
-  agents=$(claude agents --json 2>/dev/null) || die "\`claude agents --json\` failed"
-  jq -e --arg s "$1" 'any(.[]; .sessionId == $s)' >/dev/null <<<"$agents"
+  agents=$(fleet_claude "$1" agents --json 2>/dev/null) || die "\`claude agents --json\` failed"
+  jq -e --arg s "$2" 'any(.[]; .sessionId == $s)' >/dev/null <<<"$agents"
 }
 
 fleet_halt() {
-  fleet_live "$1" || return 0
-  claude stop "${1:0:8}" >/dev/null 2>&1 || die "cannot stop session ${1:0:8}"
+  fleet_live "$1" "$2" || return 0
+  fleet_claude "$1" stop "${2:0:8}" >/dev/null 2>&1 || die "cannot stop session ${2:0:8}"
 }
 
 # Live view of every slice as a JSON array, ranked.
 fleet_rows() {
-  local record="$1" agents n wt state branch pr pr_state rows="[]"
-  agents=$(fleet_agents) || exit 1
+  local record="$1" agents='[]' n wt state branch pr pr_state rows="[]"
+  if jq -e 'any(.slices[]; .session != null and .dispatch != "external")' "$record" >/dev/null; then
+    agents=$(fleet_agents "$record") || exit 1
+  fi
   for n in $(jq -r '.slices | keys[]' "$record" | sort -n); do
     wt=$(jq -r --arg n "$n" '.slices[$n].worktree // empty' "$record")
     state='{}'; branch=""; pr_state=""
@@ -108,12 +122,13 @@ fleet_rows() {
          elif $s.session == null then "pending"
          elif $phase == "done" and ($state.pr != null) then "ready"
          elif $phase == "waiting_user" then "input"
-         elif $a == null or $a.state == "blocked" then "stalled"
+         elif $s.dispatch != "external" and ($a == null or $a.state == "blocked") then "stalled"
          else "running" end) as $cat
       | . + [{slice: ($n | tonumber), title: $s.title, category: $cat, rank: $rank[$cat],
               phase: $phase, pr: ($state.pr // null), question: ($state.question // null),
               branch: (if $branch == "" then $s.branch else $branch end), base: $s.base, target: $rec[0].target,
-              session: $s.session, agent: ($a.state // null), depends: $s.depends, files: $s.files}]
+              session: $s.session, dispatch: ($s.dispatch // null), agent: ($a.state // null),
+              depends: $s.depends, files: $s.files}]
       ' <<<"$rows")
   done
   jq 'sort_by(.rank, .slice)' <<<"$rows"
@@ -139,9 +154,9 @@ fleet_base() {
 # second $2. `claude --bg` picks the id itself and can exit 0 without starting a
 # job, so the job is looked up by its name until it shows up or time runs out.
 fleet_await_session() {
-  local name="$1" since="$2" timeout="${SHEPHERD_FLEET_START_TIMEOUT:-30}" start=$SECONDS session
+  local record="$1" name="$2" since="$3" timeout="${SHEPHERD_FLEET_START_TIMEOUT:-30}" start=$SECONDS session
   while :; do
-    session=$(claude agents --json --all 2>/dev/null | jq -r --arg name "$name" --argjson since "$since" '
+    session=$(fleet_claude "$record" agents --json --all 2>/dev/null | jq -r --arg name "$name" --argjson since "$since" '
       [.[] | select(.name == $name and (.startedAt // 0) >= $since * 1000)] | sort_by(.startedAt) | last | .sessionId // empty' 2>/dev/null)
     [[ -n "$session" ]] && { printf '%s' "$session"; return 0; }
     (( SECONDS - start < timeout )) || return 1
@@ -149,8 +164,14 @@ fleet_await_session() {
   done
 }
 
+fleet_bg() {
+  local record="$1" wt="$2" name="$3" prompt="$4" since
+  since=$(date +%s)
+  (cd "$wt" && fleet_claude "$record" --bg -n "$name" "$prompt" >/dev/null) && fleet_await_session "$record" "$name" "$since"
+}
+
 fleet_dispatch() {
-  local record="$1" n="$2" base="$3" slug proposal branch wt name since session ref
+  local record="$1" n="$2" base="$3" mode="$4" slug proposal branch wt name session ref
   slug=$(jq -r .slug "$record")
   proposal=$(jq -r .proposal "$record")
   branch="fleet/$slug/slice-$n"
@@ -160,16 +181,20 @@ fleet_dispatch() {
   git rev-parse --verify -q "origin/$base" >/dev/null && ref="origin/$base"
   git worktree add -q -b "$branch" "$wt" "$ref" || die "cannot create worktree for slice-$n"
   # Recorded before the start, so the session's own `fleet self` finds it. The
-  # job name holds the session's place until its real id is known.
+  # job name holds the session's place until its real id is known (or, for an
+  # external slice, until `fleet bind`).
   if ! fleet_write "$record" --arg n "$n" --arg base "$base" --arg branch "$branch" --arg wt "$wt" --arg session "$name" \
-    '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}'; then
+    --arg mode "$mode" '.slices[$n] += {base: $base, branch: $branch, worktree: $wt, session: $session}
+      + (if $mode == "external" then {dispatch: "external"} else {} end)'; then
     git worktree remove --force "$wt"
     git branch -D -q "$branch"
     die "cannot write the fleet record"
   fi
-  since=$(date +%s)
-  if ! (cd "$wt" && claude --bg -n "$name" "/shepherd:run $proposal#slice-$n" >/dev/null) \
-    || ! session=$(fleet_await_session "$name" "$since"); then
+  if [[ "$mode" == external ]]; then
+    printf 'slice-%s\t%s\t%s\n' "$n" "$wt" "/shepherd:run $proposal#slice-$n"
+    return
+  fi
+  if ! session=$(fleet_bg "$record" "$wt" "$name" "/shepherd:run $proposal#slice-$n"); then
     fleet_write "$record" --arg n "$n" '.slices[$n] += {base: null, branch: null, worktree: null, session: null}' \
       || echo "shepherd: set .slices[\"$n\"].base, .branch, .worktree, and .session to null in $record, or slice-$n never starts" >&2
     git worktree remove --force "$wt"
@@ -179,6 +204,58 @@ fleet_dispatch() {
   fleet_write "$record" --arg n "$n" --arg session "$session" '.slices[$n].session = $session' \
     || die "slice-$n runs as session $session; set .slices[\"$n\"].session to it in $record"
   echo "dispatched slice-$n on $base ($wt)"
+}
+
+# For an external slice the app could not open: runs it as a CLI background
+# session in its worktree instead.
+fleet_launch() {
+  local record="$1" n="$2" slug proposal wt name session
+  slug=$(jq -r .slug "$record")
+  proposal=$(jq -r .proposal "$record")
+  name="shepherd-$slug-slice-$n"
+  [[ -n "$n" ]] || die "fleet launch <slice>"
+  jq -e --arg n "$n" --arg name "$name" '.slices[$n] | .dispatch == "external" and .session == $name' "$record" >/dev/null \
+    || die "slice-$n is not an unbound external slice"
+  wt=$(jq -r --arg n "$n" '.slices[$n].worktree' "$record")
+  session=$(fleet_bg "$record" "$wt" "$name" "/shepherd:run $proposal#slice-$n") \
+    || die "cannot start the session for slice-$n; if a job named $name shows up later, stop it"
+  fleet_write "$record" --arg n "$n" --arg session "$session" '.slices[$n].session = $session | del(.slices[$n].dispatch)' \
+    || die "slice-$n runs as session $session; set .slices[\"$n\"].session to it and delete .dispatch in $record"
+  echo "dispatched slice-$n ($wt)"
+}
+
+fleet_bind() {
+  local record="$1" n="$2" ref="$3"
+  [[ -n "$n" && -n "$ref" ]] || die "fleet bind <slice> <session-ref>"
+  jq -e --arg n "$n" '.slices[$n].dispatch == "external"' "$record" >/dev/null || die "slice-$n is not an external slice"
+  fleet_write "$record" --arg n "$n" --arg ref "$ref" '.slices[$n].session = $ref' || die "cannot write the fleet record"
+}
+
+fleet_cli_session() {
+  local record="$1" n="$2" session
+  jq -e --arg n "$n" '.slices[$n].dispatch == "external"' "$record" >/dev/null \
+    && die "slice-$n is an external session; open it where it runs"
+  session=$(jq -r --arg n "$n" '.slices[$n].session // empty' "$record")
+  [[ -n "$session" ]] || die "slice-$n has not started"
+  [[ "$session" == "shepherd-$(jq -r .slug "$record")-slice-$n" ]] && die "slice-$n is still starting"
+  printf '%s' "${session:0:8}"
+}
+
+fleet_logs() {
+  local record="$1" n="$2" lines=200 session
+  if [[ "$3" == "--tail" ]]; then
+    [[ "$4" =~ ^[0-9]+$ ]] || die "fleet logs <slice> [--tail N]"
+    lines="$4"
+  fi
+  session=$(fleet_cli_session "$record" "$n") || exit 1
+  fleet_claude "$record" logs "$session" | tail -n "$lines"
+}
+
+fleet_attach() {
+  local record="$1" n="$2" session dir
+  session=$(fleet_cli_session "$record" "$n") || exit 1
+  dir=$(fleet_config_dir "$record")
+  if [[ -n "$dir" ]]; then printf 'CLAUDE_CONFIG_DIR=%q claude attach %s\n' "$dir" "$session"; else echo "claude attach $session"; fi
 }
 
 fleet_slices() {
@@ -206,8 +283,16 @@ fleet_sync() {
   fleet_write "$record" --argjson s "$slices" ".slices = ($merge)" || die "cannot write the fleet record"
 }
 
+fleet_mode() {
+  case "$1" in
+    "") echo bg ;;
+    --dispatch) [[ "$2" == external ]] || die "--dispatch takes \`external\`"; echo external ;;
+    *) die "unknown option $1" ;;
+  esac
+}
+
 fleet_next() {
-  local record="$1" max target rows n base active dispatched=0
+  local record="$1" mode="$2" max target rows n base active dispatched=0
   fleet_sync "$record"
   max=$(jq -r '.max // 3' "$record")
   target=$(jq -r .target "$record")
@@ -222,17 +307,22 @@ fleet_next() {
       [[ -n "$base" ]] && break
     done
     [[ -n "$base" ]] || break
-    fleet_dispatch "$record" "$n" "$base"
+    fleet_dispatch "$record" "$n" "$base" "$mode"
     dispatched=$((dispatched + 1))
   done
   (( dispatched > 0 )) || echo "nothing to dispatch"
 }
 
 fleet_start() {
-  local proposal="$1" max=3 slug record dir slices missing
+  local proposal="$1" max=3 mode=bg slug record dir slices missing
   shift
-  [[ "$1" == "--max" && -n "$2" ]] && max="$2"
-  [[ -f "$proposal" ]] || die "fleet start <proposal> [--max N]"
+  while (( $# )); do
+    case "$1" in
+      --max) [[ -n "$2" ]] || die "--max takes a number"; max="$2"; shift 2 ;;
+      *) mode=$(fleet_mode "$1" "$2") || exit 1; shift 2 ;;
+    esac
+  done
+  [[ -f "$proposal" ]] || die "fleet start <proposal> [--max N] [--dispatch external]"
   proposal=$(cd "$(dirname "$proposal")" && pwd -P)/$(basename "$proposal")
   slug=$(basename "$proposal" .md)
   dir=$(fleet_dir)
@@ -245,18 +335,20 @@ fleet_start() {
   mkdir -p "$dir/worktrees"
   jq -n --arg slug "$slug" --arg proposal "$proposal" --arg target "$(shepherd_target_branch)" \
     --argjson max "$max" --arg now "$(shepherd_now)" --argjson slices "$slices" \
-    '{slug: $slug, proposal: $proposal, target: $target, max: $max, created: $now, slices: $slices}' \
+    --arg config_dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" \
+    '{slug: $slug, proposal: $proposal, target: $target, max: $max, created: $now, config_dir: $config_dir, slices: $slices}' \
     >"$record.tmp" && mv "$record.tmp" "$record" || die "cannot write the fleet record"
-  fleet_next "$record"
+  fleet_next "$record" "$mode"
 }
 
 fleet_status() {
-  local record="$1" json="$2" rows
+  local record="$1" json="$2" rows dir
   rows=$(fleet_rows "$record") || exit 1
   if [[ "$json" == "--json" ]]; then
     jq 'map(del(.rank))' <<<"$rows"
     return
   fi
+  dir=$(fleet_config_dir "$record"); echo "config_dir ${dir:-$HOME/.claude}"
   jq -r '.[] | [("slice-" + (.slice | tostring)), .category, (.phase // "-"),
     (if .pr then "#" + (.pr | tostring) else "-" end), (.branch // "-"), (.question // "")] | @tsv' <<<"$rows"
 }
@@ -306,18 +398,26 @@ fleet_answer() {
   session=$(jq -r --arg n "$n" '.slices[$n].session // empty' "$record")
   wt=$(jq -r --arg n "$n" '.slices[$n].worktree // empty' "$record")
   [[ -n "$session" && -d "$wt" ]] || die "slice-$n has no session"
+  if jq -e --arg n "$n" '.slices[$n].dispatch == "external"' "$record" >/dev/null; then
+    [[ "$session" == "shepherd-$(jq -r .slug "$record")-slice-$n" ]] && die "slice-$n is not bound yet; run \`fleet bind $n <session-ref>\` first"
+    echo "slice-$n runs as external session $session in $wt; send it this answer:"
+    cat "$file"
+    return
+  fi
   # Resuming a live session copies it into the caller's cwd, so stop it first
   # and resume from its own worktree.
-  fleet_halt "$session"
-  (cd "$wt" && claude --bg --resume "$session" "$(cat "$file")" >/dev/null) || die "cannot resume slice-$n"
+  fleet_halt "$record" "$session"
+  (cd "$wt" && fleet_claude "$record" --bg --resume "$session" "$(cat "$file")" >/dev/null) || die "cannot resume slice-$n"
   echo "answered slice-$n"
 }
 
 fleet_stop() {
   local record="$1" session
-  for session in $(jq -r '.slices[].session // empty' "$record"); do
-    fleet_live "$session" || continue
-    claude stop "${session:0:8}" >/dev/null 2>&1 || die "cannot stop session ${session:0:8}"
+  jq -r '.slices | to_entries[] | select(.value.dispatch == "external" and .value.session != null)
+    | "not stopped: slice-\(.key) runs as external session \(.value.session); stop it where it runs"' "$record"
+  for session in $(jq -r '.slices[] | select(.dispatch != "external") | .session // empty' "$record"); do
+    fleet_live "$record" "$session" || continue
+    fleet_claude "$record" stop "${session:0:8}" >/dev/null 2>&1 || die "cannot stop session ${session:0:8}"
     echo "stopped ${session:0:8}"
   done
 }
@@ -355,22 +455,26 @@ fleet_self() {
 }
 
 cmd_fleet() {
-  local sub="$1" slug="" record
+  local sub="$1" slug="" record mode
   shift
   [[ "$sub" == start ]] && { fleet_start "$@"; return; }
   [[ "$sub" == self ]] && { fleet_self; return; }
   if [[ "$1" == "--fleet" ]]; then slug="$2"; shift 2; fi
   case "$sub" in
-    status|wait|next|answer|stop|lead|base) record=$(fleet_record "$slug") || exit 1 ;;
+    status|wait|next|answer|stop|lead|base|logs|attach|bind|launch) record=$(fleet_record "$slug") || exit 1 ;;
   esac
   case "$sub" in
     status) fleet_status "$record" "$1" ;;
     wait) [[ "$1" == "--timeout" ]] && shift; fleet_wait "$record" "$1" ;;
-    next) fleet_next "$record" ;;
+    next) mode=$(fleet_mode "$@") || exit 1; fleet_next "$record" "$mode" ;;
     answer) fleet_answer "$record" "$@" ;;
     stop) fleet_stop "$record" ;;
     lead) fleet_lead "$record" "$1" ;;
     base) fleet_set_base "$record" "$@" ;;
-    *) die "fleet start <proposal> [--max N] | status [--json] | wait [--timeout S] | next | answer N FILE | base N BRANCH | stop | lead PHASE (each takes --fleet SLUG after it) | self" ;;
+    logs) fleet_logs "$record" "$@" ;;
+    attach) fleet_attach "$record" "$1" ;;
+    bind) fleet_bind "$record" "$@" ;;
+    launch) fleet_launch "$record" "$1" ;;
+    *) die "fleet start <proposal> [--max N] [--dispatch external] | status [--json] | wait [--timeout S] | next [--dispatch external] | answer N FILE | base N BRANCH | logs N [--tail N] | attach N | bind N REF | launch N | stop | lead PHASE (each takes --fleet SLUG after it) | self" ;;
   esac
 }
