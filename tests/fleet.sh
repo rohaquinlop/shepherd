@@ -210,7 +210,8 @@ sh "$E" fleet next --dispatch external >/dev/null
 ok "both modes pick the same slices" '[[ "$(picked "$E")" == "$(picked "$F")" && "$(picked "$F")" == *slice-1* && ! -e "$FAKE/forbidden.log" ]]'
 unset FAKE_NO_CLAUDE
 ok "launch runs an unbound external slice in the CLI" 'sh "$E" fleet launch 4 | grep -q "dispatched slice-4" && [[ "$(jq -r ".slices[\"4\"].dispatch" "$erec")" == null ]] && ! sh "$E" fleet launch 1 2>/dev/null'
-ok "logs refuses a bad --tail" '! sh "$E" fleet logs 4 --tail x 2>/dev/null'
+: > "$FAKE/claude.log"
+ok "logs refuses a bad --tail before calling claude" '! sh "$E" fleet logs 4 --tail x 2>/dev/null && ! grep -q "	logs " "$FAKE/claude.log"'
 
 echo "pass=$pass fail=$fail"; rm -rf "$T"
 (( fail == 0 ))
