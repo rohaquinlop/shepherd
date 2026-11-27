@@ -62,7 +62,10 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'git push origin :feat/x' 'git push --delete origin feat/x' 'git push -d origin feat/x' \
   'git config --worktree --unset core.hooksPath; ls' 'git config extensions.worktreeConfig false' \
   'rm -rf .git/worktrees/wt/shepherd/_githooks' 'rm -f ../r/.git/worktrees/wt/shepherd/feat__x/state.json' \
-  'rm -rf ../r/.git/worktrees/wt/shepherd' 'rm -f ../r/.git/worktrees/wt/config.worktree'; do
+  'rm -rf ../r/.git/worktrees/wt/shepherd' 'rm -f ../r/.git/worktrees/wt/config.worktree' \
+  'cd ../r/.git/worktrees/wt/shepherd/_githooks && rm -f pre-push' '(cd ../r/.git/worktrees/wt/shepherd && rm -rf feat__x)' \
+  'rm -rf .git/worktrees/wt/shepherd/_fleet/../_githooks' '$(command -v gh) pr merge 1' 'g=gh; $g pr merge 1' \
+  'caffeinate -i gh pr merge 1' 'find . -exec gh pr merge {} \;' '$(command -v gh) api -X PUT repos/o/r/pulls/1/merge'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"' \

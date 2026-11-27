@@ -6,7 +6,8 @@
 #   - deny `git config` of core.hooksPath or extensions.worktreeConfig, and
 #     rm/mv/cp/ln/chmod/unlink of a path in a git dir's shepherd/ (branch
 #     state, the gate dir; not shepherd/_fleet/) or of config.worktree, or any
-#     of them run from inside such a dir: they turn the git gate off
+#     of them run from inside such a dir (the hook's cwd, or a `cd` to it
+#     earlier in the call): they turn the git gate off
 #   - deny a command with a bare `push` word and a `--no-verify`,
 #     `core.hooksPath`, `--git-dir`, or `--work-tree` word, or a call with such
 #     a command that names GIT_CONFIG*, GIT_DIR, GIT_COMMON_DIR, or
@@ -52,18 +53,22 @@ GATE_REASON="never change or remove the git pre-push gate or shepherd state (cor
 DEEP_REASON="this command nests shells or substitutions too deep to read, and it names a push or a merge. Run the push as a plain command."
 VERIFY_REASON="never skip the git pre-push gate (--no-verify, core.hooksPath, GIT_CONFIG*, GIT_DIR, --git-dir, --work-tree). Clear the tree with the review gate, then push."
 
+# Merge words anywhere in the command, not only after a `gh` word, so
+# `$(command -v gh) pr merge` and `find -exec gh pr merge` count: no git-level
+# gate stops a merge.
 is_merge() {
-  [[ "${1##*/}" == gh ]] || return 1
-  shift
-  local a prev="" method="" fields=0 merge_path=0
+  local a k prev="" method="" fields=0 merge_path=0 api=0
   local -a pos=()
   for a in "$@"; do
     case "$prev" in -R | --repo) prev=""; continue ;; esac
     [[ "$a" != -* ]] && pos+=("$a")
     prev=$a
   done
-  [[ "${pos[0]:-}" == pr && "${pos[1]:-}" == merge ]] && return 0
-  [[ "${pos[0]:-}" == api ]] || return 1
+  for (( k = 0; k < ${#pos[@]}; k++ )); do
+    [[ "${pos[k]}" == pr && "${pos[k+1]:-}" == merge ]] && return 0
+    [[ "${pos[k]}" == api ]] && api=1
+  done
+  (( api )) || return 1
   prev=""
   for a in "$@"; do
     case "$prev" in -X | --method) method=$a ;; esac
@@ -112,7 +117,7 @@ push_denial() {
 # config.worktree. Fleet slice worktrees live under shepherd/_fleet/, so that
 # subtree is not state.
 is_state_path() {
-  [[ "$1" == */_fleet/* || "$1" == */_fleet ]] && return 1
+  [[ ( "$1" == */_fleet/* || "$1" == */_fleet ) && "$1" != *..* ]] && return 1
   [[ "$1" == *_githooks* || "$1" == config.worktree || "$1" == */config.worktree \
     || "$1" == .git/shepherd || "$1" == .git/shepherd/* || "$1" == */.git/shepherd || "$1" == */.git/shepherd/* \
     || "$1" == */worktrees/*/shepherd || "$1" == */worktrees/*/shepherd/* ]]
@@ -135,6 +140,8 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
     done
   fi
   case "${argv[0]##*/}" in
+    cd | pushd)
+      is_state_path "${argv[1]:-}" && in_state=1 ;;
     rm | mv | ln | chmod | unlink | cp)
       (( in_state )) && reason=${reason:-$GATE_REASON}
       for w in "${argv[@]:1}"; do
