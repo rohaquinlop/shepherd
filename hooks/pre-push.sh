@@ -3,8 +3,8 @@
 # command in the call (see lib/command.sh):
 #   - deny `gh pr merge` and `gh api` merge writes: shepherd never merges
 #   - deny force pushes and remote deletes: they discard what reviewers already read
-#   - deny `git config` of core.hooksPath or extensions.worktreeConfig, and
-#     rm/mv/cp/ln/chmod/unlink of a path in a git dir's shepherd/ (branch
+#   - deny `git config` writes of core.hooksPath or extensions.worktreeConfig,
+#     removal or rename of the core or extensions section, and rm/mv/cp/ln/chmod/unlink of a path in a git dir's shepherd/ (branch
 #     state, the gate dir; not shepherd/_fleet/) or of config.worktree, or any
 #     of them run from inside such a dir (the hook's cwd, or a `cd` to it
 #     earlier in the call): they turn the git gate off

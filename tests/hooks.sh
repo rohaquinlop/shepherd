@@ -68,7 +68,7 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'caffeinate -i gh pr merge 1' 'find . -exec gh pr merge {} \;' '$(command -v gh) api -X PUT repos/o/r/pulls/1/merge' \
   'rm -rf $(git rev-parse --git-dir)/shepherd' 'g=git; $g config --unset core.hooksPath' \
   '$(command -v git) config --worktree --unset core.hooksPath' 'git config --worktree core.hooksPath /tmp/x' \
-  'git config --worktree --remove-section core' 'git config --worktree --rename-section core x' \
+  'git config --worktree --remove-section core' 'git config --worktree --rename-section core x' 'git config --worktree --rename-section x core' \
   'git config --rename-section x extensions' 'git config remove-section core' 'git config unset core.hooksPath' \
   'git config core.hooksPath 2>&1 /x' 'git config --comment --get core.hooksPath /x' 'git config -f get core.hooksPath /x' \
   'rm -rf $(git rev-parse --git-dir)//shepherd' 'rm -rf $(git rev-parse --git-dir)/./shepherd' \
