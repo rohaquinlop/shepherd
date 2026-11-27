@@ -57,35 +57,18 @@ VERIFY_REASON="never skip the git pre-push gate (--no-verify, core.hooksPath, GI
 # `$(command -v gh) pr merge` and `find -exec gh pr merge` count: no git-level
 # gate stops a merge.
 is_merge() {
-  local a k prev="" method="" fields=0 merge_path=0 api=0
-  local -a pos=()
-  for a in "$@"; do
-    case "$prev" in -R | --repo) prev=""; continue ;; esac
-    [[ "$a" != -* ]] && pos+=("$a")
-    prev=$a
-  done
-  for (( k = 0; k < ${#pos[@]}; k++ )); do
-    [[ "${pos[k]}" == pr && "${pos[k+1]:-}" == merge ]] && return 0
-    [[ "${pos[k]}" == api ]] && api=1
+  local a k merge_path=0 api=0
+  shepherd_gh_parse "$@"
+  for (( k = 0; k < ${#SHEPHERD_GH_POS[@]}; k++ )); do
+    [[ "${SHEPHERD_GH_POS[k]}" == pr && "${SHEPHERD_GH_POS[k+1]:-}" == merge ]] && return 0
+    [[ "${SHEPHERD_GH_POS[k]}" == api ]] && api=1
   done
   (( api )) || return 1
-  prev=""
   for a in "$@"; do
-    case "$prev" in -X | --method) method=$a ;; esac
-    case "$a" in
-      -X?*) method=${a#-X} ;;
-      --method=*) method=${a#--method=} ;;
-      -f | -F | --field | --raw-field | --input | -f?* | -F?* | --field=* | --raw-field=* | --input=*) fields=1 ;;
-      *mergePullRequest*) return 0 ;;
-    esac
+    [[ "$a" == *mergePullRequest* ]] && return 0
     [[ "${a%%\?*}" =~ (^|/)pulls/[^/]+/merge/?$ ]] && merge_path=1
-    prev=$a
   done
-  (( merge_path )) || return 1
-  case "$method" in
-    [Gg][Ee][Tt]) return 1 ;;
-    "") (( fields )) ;;
-  esac
+  (( merge_path && SHEPHERD_GH_WRITE ))
 }
 
 # Reasons to deny the push in SHEPHERD_GIT_ARGS / SHEPHERD_GIT_CONFIG, or none.
