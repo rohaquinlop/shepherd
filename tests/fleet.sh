@@ -15,8 +15,14 @@ if [[ "\$1" == agents ]]; then
   [[ "\$*" == *--all* ]] && { cat "$FAKE/agents.json"; exit 0; }
   jq '[.[] | select(.state != "stopped")]' "$FAKE/agents.json"; exit 0
 fi
-[[ -n "\${FAKE_FAIL_BG:-}" && "\$*" == *"--session-id"* ]] && exit 1
+[[ -n "\${FAKE_FAIL_BG:-}" && "\$1 \$2" == "--bg -n" ]] && exit 1
 printf '%s\t%s\n' "\$PWD" "\$*" >> "$FAKE/claude.log"
+if [[ "\$1 \$2" == "--bg -n" ]]; then
+  [[ -n "\${FAKE_NO_JOB:-}" ]] && { echo "Starting background service…"; exit 0; }
+  id=\$(uuidgen | tr '[:upper:]' '[:lower:]')
+  jq --arg id "\$id" --arg name "\$3" --argjson t "\$(date +%s)000" '. + [{id: \$id[:8], kind: "background", sessionId: \$id, name: \$name, startedAt: \$t, state: "working"}]' "$FAKE/agents.json" > "$FAKE/agents.tmp" && mv "$FAKE/agents.tmp" "$FAKE/agents.json"
+  echo "backgrounded · \${id:0:8} · \$3"
+fi
 EOF
 cat > "$FAKE/bin/gh" <<EOF
 #!/usr/bin/env bash
@@ -24,7 +30,7 @@ cat > "$FAKE/bin/gh" <<EOF
 exit 1
 EOF
 chmod +x "$FAKE/bin/claude" "$FAKE/bin/gh"
-export PATH="$FAKE/bin:$PATH" SHEPHERD_FLEET_INTERVAL=1 CLAUDE_CODE_SESSION_ID=lead-1
+export PATH="$FAKE/bin:$PATH" SHEPHERD_FLEET_INTERVAL=1 SHEPHERD_FLEET_START_TIMEOUT=1 CLAUDE_CODE_SESSION_ID=lead-1
 
 A="$T/a"; git init -q -b main "$A"; git -C "$A" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 P="$T/plan.md"
@@ -58,7 +64,8 @@ order() { sh "$A" fleet status --json | jq -c '[.[].slice]'; }
 
 out=$(sh "$A" fleet start "$P" --max 3)
 ok "start dispatches free slices only" '[[ "$(cut -f2 "$FAKE/claude.log" | grep -o "#slice-[0-9]" | xargs)" == "#slice-1 #slice-4" ]]'
-ok "session runs in its worktree" 'grep -q "^$(wt 1)	--bg -n shepherd-plan-slice-1 --session-id $(sess 1) /shepherd:run $P#slice-1$" "$FAKE/claude.log"'
+ok "session runs in its worktree" 'grep -q "^$(wt 1)	--bg -n shepherd-plan-slice-1 /shepherd:run $P#slice-1$" "$FAKE/claude.log"'
+ok "record holds the real session id" '[[ "$(sess 1)" == "$(jq -r ".[] | select(.name == \"shepherd-plan-slice-1\") | .sessionId" "$FAKE/agents.json")" && "$(sh "$A" fleet status --json | jq -r ".[] | select(.slice == 1) | .category")" == running ]]'
 ok "record maps slice to branch, worktree, session" '[[ "$(jq -r ".slices[\"1\"] | [.base, .branch] | join(\" \")" "$rec")" == "main fleet/plan/slice-1" && -d "$(wt 1)" && -n "$(sess 4)" ]]'
 ok "parses depends and every backticked file" '[[ "$(jq -c "[.slices[\"2\"].depends, .slices[\"4\"].files]" "$rec")" == '"'"'[[1],["c.sh","d.sh"]]'"'"' ]]'
 ok "overlap and unmet dependency stay pending" '[[ "$(jq -r ".slices[\"2\"].session, .slices[\"3\"].session" "$rec" | xargs)" == "null null" ]]'
@@ -161,6 +168,8 @@ ok "failed session start leaves no worktree or branch" '! FAKE_FAIL_BG=1 sh "$C"
 git -C "$C" switch -q -c feat/t
 ok "init --target sets the PR base" '[[ "$(jq -r .target_branch "$(sh "$C" init --target fleet/plan/slice-1)/state.json")" == fleet/plan/slice-1 ]]'
 git -C "$C" switch -q main
+echo '[{"sessionId":"stale","name":"shepherd-one-slice-1","startedAt":1,"state":"done"}]' > "$FAKE/agents.json"
+ok "no new job within the timeout leaves no record, worktree, or branch" '! FAKE_NO_JOB=1 sh "$C" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"1\"].session" "$C/.git/shepherd/_fleet/one.json")" == null && $(git -C "$C" worktree list | wc -l) -eq 1 && -z "$(git -C "$C" branch --list "fleet/*")" ]]'
 ok "next succeeds after a failed start" 'sh "$C" fleet next | grep -q "dispatched slice-1"'
 
 echo "pass=$pass fail=$fail"; rm -rf "$T"
