@@ -41,7 +41,7 @@ For a goal bigger than one PR (an idea, an issue, a whole Jira story), start wit
 
 propose (slices with dependencies and files) → `shepherd.sh fleet start` (one `/shepherd:run` session per ready slice, each in its own worktree, stacked on its dependency's branch) → background `fleet wait` → settle each slice's question from evidence, or ask you → start unblocked slices → report the merge queue
 
-The lead never implements or merges. Slice sessions run in the background with your permission mode, so they need the allowlist below, or they stall on a prompt; `shepherd.sh fleet status` shows a stalled slice, and `claude attach <id>` opens it. The lead's Stop hook and resume note follow the session that last set its phase; after `/clear` or a restart, run `/shepherd:lead <proposal>` again to resume.
+The lead never implements or merges. Slice sessions run in the background with your permission mode, so they need the allowlist below, or they stall on a prompt; `shepherd.sh fleet status` shows a stalled slice, and `shepherd.sh fleet attach N` prints the command that opens it. By default each slice is a CLI background session (`claude --bg`) that uses the Claude config dir recorded at `fleet start` (`CLAUDE_CONFIG_DIR`, else `~/.claude`), also when your shell wraps `claude` in an alias or function; these sessions do not show in the desktop app. In the desktop app, the lead runs `fleet start|next --dispatch external`, starts each slice as an app session in its worktree, and records it with `fleet bind N <session-ref>`; `fleet status` then reads those slices from their shepherd state, and `fleet answer` prints the answer for the lead to send. The dependency and file rules are the same in both modes. The lead's Stop hook and resume note follow the session that last set its phase; after `/clear` or a restart, run `/shepherd:lead <proposal>` again to resume.
 
 ## Propose before you build
 
@@ -68,7 +68,7 @@ The same guard as a diagnosis keeps the session read-only. Each slice is one PR 
 | `skills/diagnose` | Finds and proves a root cause, writes it to `docs/diagnoses/`. Never fixes. |
 | `skills/propose` | Checks whether an idea is possible, writes a verdict, options, and slices to `docs/proposals/`. Never implements. |
 | `skills/lead` | Coordinates a goal: proposes slices, runs them in parallel through the fleet commands, settles their questions, reports the merge queue. Never implements or merges. |
-| `lib/fleet.sh` | `shepherd.sh fleet`: starts a background session per ready slice in its own worktree, tracks status from `claude agents`, shepherd state, and `gh`, and wakes the lead on changes. No model calls. |
+| `lib/fleet.sh` | `shepherd.sh fleet`: starts a background session per ready slice in its own worktree (or prepares it for an app session), tracks status from `claude agents`, shepherd state, and `gh`, and wakes the lead on changes. Runs every `claude` call with the recorded config dir. No model calls. |
 | `skills/followup` | Parks a verified, out-of-scope side issue as a GitHub issue or Jira draft, after your yes. Never widens the current change. |
 | `hooks/diagnose-guard.sh` | While a diagnosis or a proposal is active, blocks edits outside the write-up and scratch dir, and git commands that change state. |
 | `agents/reviewer` | A fresh reviewer with only `Read`, `Grep`, and `Glob`. It reads a review bundle and the target branch's rules, then returns findings or `current at <sha>`. |
@@ -196,7 +196,7 @@ Per worktree, in `shepherd/_githooks/` under the same git dir: the git gate's ho
 
 Per worktree, for an active diagnosis or proposal (one at a time), in `shepherd/_diagnose/` under the same git dir: `active.json` (turns the guard on; `kind` says which) and `scratch/<slug>/` for probes. The write-up itself is in `docs/diagnoses/` or `docs/proposals/`, which are not excluded from git: commit it only if you want it in the repo.
 
-For a fleet, in `shepherd/_fleet/` under the common git dir (shared by all worktrees): `<slug>.json` (each slice's dependencies, files, base, branch, worktree, session, and the lead's phase) and `worktrees/<slug>-slice-N/`.
+For a fleet, in `shepherd/_fleet/` under the common git dir (shared by all worktrees): `<slug>.json` (the Claude config dir, each slice's dependencies, files, base, branch, worktree, session, and dispatch mode, and the lead's phase) and `worktrees/<slug>-slice-N/`.
 
 Older versions kept this in `.claude/shepherd/` in the work tree. The first shepherd command or hook in that worktree moves it to the git dir.
 

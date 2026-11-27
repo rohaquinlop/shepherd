@@ -28,8 +28,9 @@
 #   wait-review [--timeout SECONDS]    block until a new PR review or comment lands
 #   diagnose start --slug SLUG | status | end   diagnosis write-up, scratch dir, edit guard
 #   propose start --slug SLUG | status | end    proposal write-up, scratch dir, same edit guard
-#   fleet start PROPOSAL [--max N]     start a session per ready slice, each in its own worktree
-#   fleet status [--json] | wait [--timeout S] | next | answer N FILE | base N BRANCH | stop
+#   fleet start PROPOSAL [--max N] [--dispatch external]   start a session per ready slice, each in its own worktree
+#   fleet status [--json] | wait [--timeout S] | next [--dispatch external] | answer N FILE | base N BRANCH | stop
+#         | logs N [--tail N] | attach N | bind N REF | launch N
 #                                      | lead PHASE; with several fleets, add --fleet SLUG after the subcommand
 #   fleet self                         this worktree's slice: slug, slice, base, target
 
