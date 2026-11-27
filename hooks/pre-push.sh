@@ -96,35 +96,77 @@ push_denial() {
   done
 }
 
-# A write to core.hooksPath or extensions.worktreeConfig after a `config` word,
-# whatever runs it (`$g config`, `$(command -v git) config`). Reads pass.
+# A write to core.hooksPath or extensions.worktreeConfig, or a removal or
+# rename of the core or extensions section, after a `config` word, whatever
+# runs it (`$g config`, `$(command -v git) config`). Reads pass. The splitter
+# drops quotes, so a redirect word (`2>&1`) is read as a value, not skipped.
 is_gate_config_write() {
-  local seen=0 key=0 write=0 w
+  local seen=0 pos=0 arg=0 key=0 write=0 read=0 section=0 w
   for w in "$@"; do
     if (( ! seen )); then
       [[ "$w" == config ]] && seen=1
       continue
     fi
+    if (( arg )); then
+      arg=0
+      continue
+    fi
     case "$w" in
-      --unset* | --add | --replace-all | --remove-section | --rename-section) write=1 ;;
+      -f | --file | --blob | --type | --default | --comment | --value | --url) arg=1 ;;
+      --get* | --list | -l) read=1 ;;
+      --remove-section | --rename-section) write=1 section=1 ;;
+      --unset* | --add | --replace-all) write=1 ;;
       -*) ;;
-      *hookspath* | *worktreeconfig*) key=1 ;;
-      *) (( key )) && write=1 ;;
+      *)
+        pos=$((pos + 1))
+        if (( pos == 1 )); then
+          case "$w" in
+            get | list) read=1; continue ;;
+            unset) write=1; continue ;;
+            remove-section | rename-section) write=1 section=1; continue ;;
+          esac
+        fi
+        if (( section )); then
+          [[ "$w" == core || "$w" == extensions ]] && key=1
+        elif [[ "$w" == *hookspath* || "$w" == *worktreeconfig* ]]; then
+          key=1
+        elif (( key )); then
+          write=1
+        fi ;;
     esac
   done
-  (( key && write ))
+  (( key && write && ! read ))
 }
 
 # A path in a git dir's shepherd/ (branch state, the gate dir) or a
 # config.worktree. Fleet slice worktrees live under shepherd/_fleet/, so that
 # subtree is not state. A leading /shepherd is the tail of a substituted path
 # (`$(git rev-parse --git-dir)/shepherd`), since the splitter drops `$(...)`.
+# The path is matched after `//`, `/./`, and `x/..` collapse; a leading `..`
+# stays, so `/../shepherd` (beside the git dir) is not state.
 is_state_path() {
-  [[ ( "$1" == */_fleet/* || "$1" == */_fleet ) && "$1" != *..* ]] && return 1
-  [[ "$1" == *_githooks* || "$1" == config.worktree || "$1" == */config.worktree \
-    || "$1" == /shepherd || "$1" == /shepherd/* \
-    || "$1" == .git/shepherd || "$1" == .git/shepherd/* || "$1" == */.git/shepherd || "$1" == */.git/shepherd/* \
-    || "$1" == */worktrees/*/shepherd || "$1" == */worktrees/*/shepherd/* ]]
+  local IFS=/ part p
+  local -a parts kept=()
+  read -ra parts <<<"$1"
+  for part in ${parts[@]+"${parts[@]}"}; do
+    case "$part" in
+      '' | .) ;;
+      ..)
+        if (( ${#kept[@]} )) && [[ "${kept[${#kept[@]}-1]}" != .. ]]; then
+          unset "kept[${#kept[@]}-1]"
+        else
+          kept+=(..)
+        fi ;;
+      *) kept+=("$part") ;;
+    esac
+  done
+  p="${kept[*]}"
+  [[ "$1" == /* ]] && p=/$p
+  [[ ( "$p" == */_fleet/* || "$p" == */_fleet ) && "$p" != *..* ]] && return 1
+  [[ "$p" == *_githooks* || "$p" == config.worktree || "$p" == */config.worktree \
+    || "$p" == /shepherd || "$p" == /shepherd/* \
+    || "$p" == .git/shepherd || "$p" == .git/shepherd/* || "$p" == */.git/shepherd || "$p" == */.git/shepherd/* \
+    || "$p" == */worktrees/*/shepherd || "$p" == */worktrees/*/shepherd/* ]]
 }
 
 shopt -s nocasematch
