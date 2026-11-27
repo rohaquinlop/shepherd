@@ -185,13 +185,19 @@ ok "next succeeds after a failed start" 'sh "$C" fleet next | grep -q "dispatche
 : > "$FAKE/cfg.log"; jq 'del(.config_dir)' "$C/.git/shepherd/_fleet/one.json" > "$T/one.json" && mv "$T/one.json" "$C/.git/shepherd/_fleet/one.json"
 ok "a record without config_dir uses the current env" 'CLAUDE_CONFIG_DIR="$T/env" sh "$C" fleet status >/dev/null && [[ "$(sort -u "$FAKE/cfg.log")" == "$T/env" ]]'
 
-E="$T/e"; git init -q -b main "$E"; git -C "$E" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+repo() { git init -q -b main "$1"; git -C "$1" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init; }
+picked() { jq -c '[.slices | to_entries[] | select(.value.session != null) | {k: .key, b: .value.base}]' "$1/.git/shepherd/_fleet/plan.json"; }
+slice_done() { (cd "$(jq -r '.slices["1"].worktree' "$1/.git/shepherd/_fleet/plan.json")" && bash "$CLI" init >/dev/null && bash "$CLI" set phase=done pr:=21); }
+F="$T/f"; repo "$F"; sh "$F" fleet start "$P" --max 3 >/dev/null; slice_done "$F"; sh "$F" fleet next >/dev/null
+
+E="$T/e"; repo "$E"
 erec="$E/.git/shepherd/_fleet/plan.json"
 ewt() { jq -r --arg n "$1" '.slices[$n].worktree' "$erec"; }
 export FAKE_NO_CLAUDE=1
 eout=$(sh "$E" fleet start "$P" --dispatch external --max 3)
-ok "external start prints one line per free slice and runs no claude" '[[ "$(cut -d" " -f1 <<<"$eout" | xargs)" == "slice-1 slice-4" ]] && grep -qx "slice-1 $(ewt 1) /shepherd:run $P#slice-1" <<<"$eout" && [[ ! -e "$FAKE/forbidden.log" && -d "$(ewt 1)" ]]'
+ok "external start prints one line per free slice and runs no claude" '[[ "$(cut -f1 <<<"$eout" | xargs)" == "slice-1 slice-4" ]] && grep -qx "slice-1	$(ewt 1)	/shepherd:run $P#slice-1" <<<"$eout" && [[ ! -e "$FAKE/forbidden.log" && -d "$(ewt 1)" ]]'
 ok "external slices are recorded and running" '[[ "$(jq -r "[.slices[\"1\"].dispatch, .slices[\"4\"].dispatch] | join(\" \")" "$erec")" == "external external" && "$(sh "$E" fleet status --json | jq -r "[.[] | select(.category == \"running\") | .slice] | join(\",\")")" == 1,4 ]]'
+ok "answer refuses an unbound external slice" '! sh "$E" fleet answer 1 "$T/answer.txt" >/dev/null 2>&1'
 sh "$E" fleet bind 1 app-session-1
 ok "bind records the session ref" '[[ "$(jq -r ".slices[\"1\"].session" "$erec")" == app-session-1 ]] && ! sh "$E" fleet bind 3 x 2>/dev/null'
 (cd "$(ewt 1)" && bash "$CLI" init >/dev/null && bash "$CLI" set phase=waiting_user question=which)
@@ -199,11 +205,12 @@ ok "external status follows the state file" '[[ "$(sh "$E" fleet status --json |
 ok "external answer prints the answer instead of resuming" '[[ "$(sh "$E" fleet answer 1 "$T/answer.txt" | tail -1)" == "use option b" ]]'
 ok "logs and attach refuse an external slice" '! sh "$E" fleet logs 1 2>/dev/null && ! sh "$E" fleet attach 1 2>/dev/null'
 ok "stop names external slices and runs no claude" '[[ "$(sh "$E" fleet stop | wc -l | xargs)" == 2 ]]'
-(cd "$(ewt 1)" && bash "$CLI" set phase=done pr:=21)
+slice_done "$E"
 sh "$E" fleet next --dispatch external >/dev/null
-ok "both modes pick the same slices" '[[ "$(jq -c "[.slices | to_entries[] | select(.value.session != null) | {k: .key, b: .value.base}]" "$erec")" == "[{\"k\":\"1\",\"b\":\"main\"},{\"k\":\"2\",\"b\":\"fleet/plan/slice-1\"},{\"k\":\"4\",\"b\":\"main\"}]" && ! -e "$FAKE/forbidden.log" ]]'
+ok "both modes pick the same slices" '[[ "$(picked "$E")" == "$(picked "$F")" && "$(picked "$F")" == *slice-1* && ! -e "$FAKE/forbidden.log" ]]'
 unset FAKE_NO_CLAUDE
 ok "launch runs an unbound external slice in the CLI" 'sh "$E" fleet launch 4 | grep -q "dispatched slice-4" && [[ "$(jq -r ".slices[\"4\"].dispatch" "$erec")" == null ]] && ! sh "$E" fleet launch 1 2>/dev/null'
+ok "logs refuses a bad --tail" '! sh "$E" fleet logs 4 --tail x 2>/dev/null'
 
 echo "pass=$pass fail=$fail"; rm -rf "$T"
 (( fail == 0 ))

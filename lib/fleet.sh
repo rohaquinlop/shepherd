@@ -191,7 +191,7 @@ fleet_dispatch() {
     die "cannot write the fleet record"
   fi
   if [[ "$mode" == external ]]; then
-    echo "slice-$n $wt /shepherd:run $proposal#slice-$n"
+    printf 'slice-%s\t%s\t%s\n' "$n" "$wt" "/shepherd:run $proposal#slice-$n"
     return
   fi
   if ! session=$(fleet_bg "$record" "$wt" "$name" "/shepherd:run $proposal#slice-$n"); then
@@ -231,18 +231,22 @@ fleet_bind() {
   fleet_write "$record" --arg n "$n" --arg ref "$ref" '.slices[$n].session = $ref' || die "cannot write the fleet record"
 }
 
-# Session prefix of a CLI slice, for `claude logs` and `claude attach`.
 fleet_cli_session() {
   local record="$1" n="$2" session
-  session=$(jq -r --arg n "$n" '.slices[$n] | select(.dispatch != "external") | .session // empty' "$record")
-  [[ -n "$session" ]] || die "slice-$n has no CLI session; an external slice is open in the app that runs it"
+  jq -e --arg n "$n" '.slices[$n].dispatch == "external"' "$record" >/dev/null \
+    && die "slice-$n is an external session; open it where it runs"
+  session=$(jq -r --arg n "$n" '.slices[$n].session // empty' "$record")
+  [[ -n "$session" ]] || die "slice-$n has not started"
   [[ "$session" == "shepherd-$(jq -r .slug "$record")-slice-$n" ]] && die "slice-$n is still starting"
   printf '%s' "${session:0:8}"
 }
 
 fleet_logs() {
   local record="$1" n="$2" lines=200 session
-  [[ "$3" == "--tail" && -n "$4" ]] && lines="$4"
+  if [[ "$3" == "--tail" ]]; then
+    [[ "$4" =~ ^[0-9]+$ ]] || die "fleet logs <slice> [--tail N]"
+    lines="$4"
+  fi
   session=$(fleet_cli_session "$record" "$n") || exit 1
   fleet_claude "$record" logs "$session" | tail -n "$lines"
 }
@@ -395,6 +399,7 @@ fleet_answer() {
   wt=$(jq -r --arg n "$n" '.slices[$n].worktree // empty' "$record")
   [[ -n "$session" && -d "$wt" ]] || die "slice-$n has no session"
   if jq -e --arg n "$n" '.slices[$n].dispatch == "external"' "$record" >/dev/null; then
+    [[ "$session" == "shepherd-$(jq -r .slug "$record")-slice-$n" ]] && die "slice-$n is not bound yet; run \`fleet bind $n <session-ref>\` first"
     echo "slice-$n runs as external session $session in $wt; send it this answer:"
     cat "$file"
     return
