@@ -150,6 +150,7 @@ ok "guard denies git on the real repo from a scratch repo cwd" 'gdenied "git -C 
 ok "guard denies an edit in the real repo from a scratch repo cwd" \
   'jq -n --arg d "$scr/repo" --arg f "$T/r/src.c" "{tool_name:\"Write\", tool_input:{file_path:\$f}, cwd:\$d}" | bash "$HOOKS/diagnose-guard.sh" | grep -q "\"deny\""'
 (cd "$T/r" && bash "$CLI" diagnose end >/dev/null)
+ok "SessionStart skips resume" '[[ "$(jq -r ".hooks.SessionStart[].matcher" "$REPO/hooks/hooks.json")" == "startup|clear|compact" ]]'
 
 echo "pass=$pass fail=$fail"; git -C "$T/r" worktree remove --force "$W"; git -C "$T/r" worktree remove --force "$W2"; rm -rf "$T"
 (( fail == 0 ))
