@@ -163,24 +163,28 @@ _shepherd_heredoc_start() {
 }
 
 # At the newline in s[i] that ends a line with heredocs, read their bodies and
-# leave i on the newline that ends the last delimiter line.
+# leave i on the newline that ends the last delimiter line. A body with no
+# delimiter line (`(( a << 2 ))` reads as a heredoc) stays commands.
 _shepherd_heredoc_bodies() {
-  local h k line tab body shell=0 p=$((i + 1))
+  local h k line tab body shell=0 found p=$((i + 1))
   for (( k = line_seg; k < ${#SHEPHERD_SEGMENTS[@]}; k++ )); do
     h=${SHEPHERD_SEGMENTS[k]%%"$SHEPHERD_SEP"*}
     case "${h##*/}" in bash | sh | zsh | dash | ksh | eval | source | .) shell=1 ;; esac
   done
   for h in "${heredocs[@]}"; do
-    body=""
+    body="" found=0
     while (( p < n )); do
       line=${s:p}; line=${line%%$'\n'*}
       p=$((p + ${#line} + 1))
       tab=$line
       [[ "${h:0:1}" == 1 ]] && while [[ "$tab" == $'\t'* ]]; do tab=${tab#$'\t'}; done
-      [[ "$tab" == "${h:2}" ]] && break
+      [[ "$tab" == "${h:2}" ]] && { found=1; break; }
       body+="$line"$'\n'
     done
-    if (( shell )); then
+    if (( ! found )); then
+      heredocs=()
+      return 0
+    elif (( shell )); then
       _shepherd_split "$body" $((depth + 1))
     elif [[ "${h:1:1}" == 0 ]]; then
       _shepherd_substitutions "$body" $((depth + 1))

@@ -127,7 +127,8 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   'git push --no-verify origin main' 'git branch -D x' 'gh api -X POST repos/o/r/issues/1/comments' \
   'gh api --method=PATCH repos/o/r/issues/1' 'gh api repos/o/r/issues/1/comments -f body=x' \
   'gh api graphql -f query="mutation { x }"' $'bash <<EOF\ngit commit -m x\nEOF' $'cat <<EOF | sh\ngit commit -m x\nEOF' \
-  $'cat <<EOF\n$(git commit -m x)\nEOF' $'cat <<EOF\ntext\nEOF\ngit commit -m x' "cd $scr && git branch -D main" \
+  $'cat <<EOF\n$(git commit -m x)\nEOF' $'cat <<EOF\ntext\nEOF\ngit commit -m x' $'(( a << 2 ))\ngit commit -m x' \
+  "cd $scr && git branch -D main" \
   "(cd $scr/repo && git commit -m x); git commit -m y" "cd $scr/repo; cd $T/r; git commit -m x" \
   "cd $scr/repo && git -C ../../.. commit -m x" "cd $scr/repo && GIT_DIR=$T/r/.git git commit -m x" \
   "git -C $scr/repo --git-dir=$T/r/.git commit -m x" "git -C $scr/nope commit -m x" "bash -c 'cd $scr/repo'; git commit -m x"; do
