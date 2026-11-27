@@ -118,5 +118,7 @@ W2="$T/wt2"; git -C "$W" worktree add -q -b feat/y "$W2" main
 ok "a worktree added from a gated one gets its own gate" \
   '[[ "$(git -C "$W2" config --worktree core.hooksPath)" == "$T/r/.git/worktrees/wt2/shepherd/_githooks" ]]'
 
+ok "SessionStart skips resume" '[[ "$(jq -r ".hooks.SessionStart[].matcher" "$REPO/hooks/hooks.json")" == "startup|clear|compact" ]]'
+
 echo "pass=$pass fail=$fail"; git -C "$T/r" worktree remove --force "$W"; git -C "$T/r" worktree remove --force "$W2"; rm -rf "$T"
 (( fail == 0 ))

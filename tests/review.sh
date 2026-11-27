@@ -122,7 +122,6 @@ for f in plan-review.md exempt.md hosted-review.md; do
 done
 ok "skill: CI watch output goes to /dev/null" 'grep -qF "gh pr checks <pr> --watch --interval 30 >/dev/null 2>&1; gh pr checks <pr>" "$SK"'
 ok "skill: fleet slice never uses the question tool" 'sed -n "/^## Interrupts/,/^## Never/p" "$SK" | grep -q "fleet self. succeeds), never use the question tool"'
-ok "hooks: SessionStart skips resume" '[[ "$(jq -r ".hooks.SessionStart[].matcher" "$REPO/hooks/hooks.json")" == "startup|clear|compact" ]]'
 ok "policy-base left no worktree" '[[ $(git -C "$R" worktree list | wc -l) -eq 1 ]]'
 git -C "$R" switch -q -c feat/y; sh init --pr 9 >/dev/null 2>&1
 ok "init --pr uses the post-PR budget" '[[ "$(sh get max_reviews)" == 2 ]]'

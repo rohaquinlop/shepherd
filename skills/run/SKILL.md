@@ -274,9 +274,10 @@ waiting on a person:
 Stop for the user only for these. Before asking, `$SHEPHERD set phase=waiting_user question="<the
 question in one line>"` (a fleet lead reads it to settle or forward the question), record the
 context with `$SHEPHERD decision`, and ask **one** structured question with options and your
-recommendation (use the harness's question tool when there is one). Say in the question what you
-checked and why none of it settles the choice. The recommendation follows the rule in *Decide by
-default*. If a notification tool is available, send one too.
+recommendation (use the harness's question tool when there is one, except in a fleet slice: see
+below). Say in the question what you checked and why none of it settles the choice. The
+recommendation follows the rule in *Decide by default*. If a notification tool is available, send
+one too.
 
 - A design choice, API trade-off, or behavioral default that nothing in *Decide by default*
   settles, including one in a complex task's plan.
