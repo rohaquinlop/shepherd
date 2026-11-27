@@ -113,8 +113,15 @@ config '{"max_reviews_after_pr": 2}'
 sh review-round --user --reason "user" >/dev/null
 ok "post-PR budget from config" '[[ "$(sh get max_reviews)" == 2 ]]'
 
-# 5. the run skill names Opus only under the escalation rule
+# 5. the run skill: Opus only under the escalation rule, reference files, CI watch, fleet interrupts
 ok "skill: opus only in escalation" '[[ "$(grep -ci opus "$REPO/skills/run/SKILL.md")" == 1 ]] && grep -i opus "$REPO/skills/run/SKILL.md" | grep -q "only way"'
+SK="$REPO/skills/run/SKILL.md"
+ok "skill: smaller than 21460 bytes" '(( $(wc -c <"$SK") < 21460 ))'
+for f in plan-review.md exempt.md hosted-review.md; do
+  ok "skill: names and ships $f" 'grep -q "\`$f\`" "$SK" && [[ -s "$REPO/skills/run/$f" ]]'
+done
+ok "skill: CI watch output goes to /dev/null" 'grep -qF "gh pr checks <pr> --watch --interval 30 >/dev/null 2>&1; gh pr checks <pr>" "$SK"'
+ok "skill: fleet slice never uses the question tool" 'sed -n "/^## Interrupts/,/^## Never/p" "$SK" | grep -q "fleet self. succeeds), never use the question tool"'
 ok "policy-base left no worktree" '[[ $(git -C "$R" worktree list | wc -l) -eq 1 ]]'
 git -C "$R" switch -q -c feat/y; sh init --pr 9 >/dev/null 2>&1
 ok "init --pr uses the post-PR budget" '[[ "$(sh get max_reviews)" == 2 ]]'
