@@ -22,6 +22,18 @@ command -v jq >/dev/null || exit 0
 input=$(cat)
 cwd=$(jq -r '.cwd // empty' <<<"$input")
 [[ -n "$cwd" ]] && cd "$cwd" 2>/dev/null
+start=$(pwd -P)
+
+# A repo in the scratch dir has its own git dir, so read the diagnosis from
+# the worktree that holds the scratch dir.
+if [[ "$start" == */shepherd/_diagnose/scratch/* ]]; then
+  gitdir=${start%%/shepherd/_diagnose/scratch/*}
+  if [[ -f "$gitdir/gitdir" ]]; then
+    cd "$(dirname "$(cat "$gitdir/gitdir")")" 2>/dev/null
+  else
+    cd "$gitdir/.." 2>/dev/null
+  fi
+fi
 
 shepherd_diagnose_active || exit 0
 
@@ -74,12 +86,13 @@ cd_target() {
   printf '%s' "$t"
 }
 
-# The git command in SHEPHERD_GIT_* runs on a repo whose git dir is under the
-# scratch dir. A dir that is not a repo does not count: the scratch dir is in
-# the real repo's git dir, so git there acts on the real repo.
+# The git command in SHEPHERD_GIT_* runs on a repo whose git dir and work tree
+# are under the scratch dir, and sets no config. A dir that is not a repo does
+# not count: the scratch dir is in the real repo's git dir, so git there acts
+# on the real repo.
 in_scratch() {
-  local d="$dir" c common
-  (( SHEPHERD_GIT_REDIRECT || git_env )) && return 1
+  local d="$dir" c common top
+  (( SHEPHERD_GIT_REDIRECT || git_env || ${#SHEPHERD_GIT_CONFIG[@]} )) && return 1
   for c in ${SHEPHERD_GIT_DIRS[@]+"${SHEPHERD_GIT_DIRS[@]}"}; do
     if [[ "$c" == /* ]]; then
       d=$c
@@ -89,25 +102,28 @@ in_scratch() {
     fi
   done
   [[ -n "$d" ]] && common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null) && [[ -n "$common" ]] || return 1
-  common=$(cd "$d" && cd "$common" && pwd -P) && under_scratch "$common"
+  top=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) && [[ -n "$top" ]] || return 1
+  common=$(cd "$d" && cd "$common" && pwd -P) && under_scratch "$common" && under_scratch "$(cd "$top" && pwd -P)"
 }
 
 git_write() {
-  local a pos=0
+  local a prev="" pos=0
   case "$SHEPHERD_GIT_SUB" in
     commit | switch | checkout | push | merge | rebase | reset | stash | cherry-pick | revert | am | apply | restore | rm | mv | clean | update-ref)
       return 0 ;;
     branch)
       for a in ${SHEPHERD_GIT_ARGS[@]+"${SHEPHERD_GIT_ARGS[@]}"}; do
-        [[ "$a" == --delete || "$a" == --move || ( "$a" == -[!-]* && "$a" == *[mMdD]* ) ]] && return 0
+        [[ "$a" == --delete || "$a" == --move || "$a" == --copy || "$a" == --force || ( "$a" == -[!-]* && "$a" == *[mMdDcCf]* ) ]] && return 0
       done ;;
     tag)
       for a in ${SHEPHERD_GIT_ARGS[@]+"${SHEPHERD_GIT_ARGS[@]}"}; do
+        case "$prev" in --sort | --format) prev=""; continue ;; esac
         case "$a" in
           -l | --list | -n* | --contains* | --no-contains* | --points-at* | --merged* | --no-merged* | -v | --verify) return 1 ;;
           -*) ;;
           *) pos=1 ;;
         esac
+        prev=$a
       done
       (( pos )) && return 0 ;;
     worktree)
@@ -116,16 +132,23 @@ git_write() {
   return 1
 }
 
-# A gh command that writes to a PR, an issue, or the API. A graphql call
-# counts only with a mutation or an --input file: queries are POSTs too.
+# A gh command that writes to a PR, an issue, or the API. graphql queries are
+# POSTs too, so a graphql call passes only with a literal query (`query=` and a
+# `{` in one word) and no mutation, `@file` value, or --input.
 gh_write() {
+  local a literal=0
   shepherd_gh_parse "$@"
   case "${SHEPHERD_GH_POS[1]:-} ${SHEPHERD_GH_POS[2]:-}" in
-    "pr create" | "pr merge" | "pr edit" | "pr comment" | "pr review" | "issue comment" | "issue close" | "issue edit") return 0 ;;
+    "pr create" | "pr merge" | "pr edit" | "pr comment" | "pr review" | "pr close" | "pr ready" | "pr reopen" \
+      | "issue create" | "issue comment" | "issue close" | "issue edit" | "issue reopen" | "issue delete" | "issue transfer") return 0 ;;
   esac
   [[ "${SHEPHERD_GH_POS[1]:-}" == api ]] && (( SHEPHERD_GH_WRITE )) || return 1
   [[ " ${SHEPHERD_GH_POS[*]} " == *" graphql "* ]] || return 0
-  [[ "$*" == *mutation* || "$*" == *--input* ]]
+  for a in "$@"; do
+    [[ "$a" == *mutation* || "$a" == *=@* || "$a" == --input* ]] && return 0
+    [[ "$a" == query=*'{'* ]] && literal=1
+  done
+  (( ! literal ))
 }
 
 case "$tool" in
@@ -144,17 +167,19 @@ case "$tool" in
     cmd=$(jq -r '.tool_input.command // empty' <<<"$input")
     scratch_p=$(physical "$scratch")
     git_env=0
-    [[ "$cmd" == *GIT_DIR* || "$cmd" == *GIT_WORK_TREE* || "$cmd" == *GIT_COMMON_DIR* ]] && git_env=1
+    [[ "$cmd" == *GIT_DIR* || "$cmd" == *GIT_WORK_TREE* || "$cmd" == *GIT_COMMON_DIR* || "$cmd" == *GIT_CONFIG* ]] && git_env=1
     [[ "$cmd" =~ ^[[:space:]]*(cd|pushd)[[:space:]] ]] && leading=1 || leading=0
-    dir=$(pwd -P)
+    dir=$start
     shepherd_split_command "$cmd" --heredoc-data
+    (( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *git* || "$cmd" == *gh* ]] \
+      && deny "this command nests shells or substitutions too deep to read. Run git and gh as plain commands."
     for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
       IFS="$SHEPHERD_SEP" read -ra argv <<<"$seg"
       case "${argv[0]##*/}" in
         cd | pushd) dir=$(cd_target "${argv[@]:1}") ;;
         popd) dir="" ;;
         git)
-          shepherd_git_parse "${argv[@]}" && git_write && ! in_scratch && deny "this command changes git or PR state." ;;
+          shepherd_git_parse "${argv[@]}" && git_write && { [[ "$SHEPHERD_GIT_SUB" == push ]] || ! in_scratch; } && deny "this command changes git or PR state." ;;
         gh)
           gh_write "${argv[@]}" && deny "this command changes git or PR state." ;;
       esac

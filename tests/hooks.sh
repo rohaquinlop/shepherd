@@ -121,6 +121,8 @@ ok "a worktree added from a gated one gets its own gate" \
 # 6. diagnose guard: git and gh writes per command, scratch repos and heredoc text pass
 scr=$(cd "$T/r" && bash "$CLI" diagnose start --slug g | sed -n 's/^scratch: //p')
 git init -q "$scr/repo"; commit "$scr/repo" --allow-empty -m init
+git init -q "$scr/wt"; git -C "$scr/wt" config core.worktree "$T/r"
+deep='git commit -m x'; for _ in 1 2 3 4 5 6; do deep="bash -c $(printf %q "$deep")"; done
 gdenied() { denied "$1" "${2:-$T/r}" diagnose-guard.sh; }
 for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue comment 1 -b x' 'gh -R o/r issue close 1' \
   'gh issue edit 1 --title x' 'git worktree add ../x' 'git worktree remove ../x' 'git update-ref refs/heads/x HEAD' \
@@ -131,16 +133,22 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   "cd $scr && git branch -D main" \
   "(cd $scr/repo && git commit -m x); git commit -m y" "cd $scr/repo; cd $T/r; git commit -m x" \
   "cd $scr/repo && git -C ../../.. commit -m x" "cd $scr/repo && GIT_DIR=$T/r/.git git commit -m x" \
-  "git -C $scr/repo --git-dir=$T/r/.git commit -m x" "git -C $scr/nope commit -m x" "bash -c 'cd $scr/repo'; git commit -m x"; do
+  "git -C $scr/repo --git-dir=$T/r/.git commit -m x" "git -C $scr/nope commit -m x" "bash -c 'cd $scr/repo'; git commit -m x" \
+  "git -C $scr/repo -c core.worktree=$T/r clean -fdx" "GIT_CONFIG_COUNT=1 git -C $scr/repo clean -fdx" \
+  "git -C $scr/wt clean -fdx" "git -C $scr/repo push origin main" 'gh api graphql -F query=@m.graphql' \
+  'gh api graphql -f query="$(cat m.graphql)"' "$deep" 'gh pr close 1' 'gh issue create -t x' 'git branch -f x'; do
   ok "guard denies: ${c//$'\n'/\\n}" 'gdenied "$c"'
 done
 for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit -m x" \
   "cat > $scr/n.md <<'EOF'"$'\ngit commit -m x\nEOF' $'cat <<-EOF\n\tgit commit -m x\n\tEOF\necho done' \
   'git log --grep commit' 'git tag' 'git tag -l "v*"' 'git branch -a' 'gh api repos/o/r/pulls' \
-  'gh api graphql -f query="{ viewer { login } }"' 'gh issue view 1' 'echo "git commit -m x"' 'git status'; do
+  'gh api graphql -f query="{ viewer { login } }"' 'gh issue view 1' 'git tag --sort refname' 'echo "git commit -m x"' 'git status'; do
   ok "guard allows: ${c//$'\n'/\\n}" '! gdenied "$c"'
 done
 ok "guard allows git run from a scratch repo cwd" '! gdenied "git commit -m x" "$scr/repo"'
+ok "guard denies git on the real repo from a scratch repo cwd" 'gdenied "git -C $T/r commit -m x" "$scr/repo"'
+ok "guard denies an edit in the real repo from a scratch repo cwd" \
+  'jq -n --arg d "$scr/repo" --arg f "$T/r/src.c" "{tool_name:\"Write\", tool_input:{file_path:\$f}, cwd:\$d}" | bash "$HOOKS/diagnose-guard.sh" | grep -q "\"deny\""'
 (cd "$T/r" && bash "$CLI" diagnose end >/dev/null)
 
 echo "pass=$pass fail=$fail"; git -C "$T/r" worktree remove --force "$W"; git -C "$T/r" worktree remove --force "$W2"; rm -rf "$T"
