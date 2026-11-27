@@ -61,11 +61,12 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   "zsh -c 'git push --no-verify origin feat/x'" "dash -c 'git push -f origin feat/x'" \
   'git push origin :feat/x' 'git push --delete origin feat/x' 'git push -d origin feat/x' \
   'git config --worktree --unset core.hooksPath; ls' 'git config extensions.worktreeConfig false' \
-  'rm -rf .git/worktrees/wt/shepherd/_githooks'; do
+  'rm -rf .git/worktrees/wt/shepherd/_githooks' 'rm -f ../r/.git/worktrees/wt/shepherd/feat__x/state.json' \
+  'rm -rf ../r/.git/worktrees/wt/shepherd'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"' \
-  'git push -u origin feat/x' 'git config user.name t'; do
+  'git push -u origin feat/x' 'git config user.name t' 'git push -F origin feat/x' 'rm -f shepherd-notes.txt'; do
   ok "hook allows: $c" '! denied "$c"'
 done
 ok "push then rm -f is not a force push" '! denied "git push origin feat/x && rm -f x"'

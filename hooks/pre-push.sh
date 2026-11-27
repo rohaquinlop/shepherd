@@ -4,8 +4,9 @@
 #   - deny `gh pr merge` and `gh api` merge writes: shepherd never merges
 #   - deny force pushes and remote deletes: they discard what reviewers already read
 #   - deny `git config` of core.hooksPath or extensions.worktreeConfig, and
-#     rm/mv/cp/ln/chmod/unlink of a shepherd/_githooks path: they turn the git
-#     gate off
+#     rm/mv/cp/ln/chmod/unlink of a `shepherd/` path (the gate dir or branch
+#     state): they turn the git gate off
+# Calls whose text names none of push, merge, config, or shepherd exit first.
 #   - deny a command with a bare `push` word and a `--no-verify`,
 #     `core.hooksPath`, `--git-dir`, or `--work-tree` word, or a call with such
 #     a command that names GIT_CONFIG*, GIT_DIR, GIT_COMMON_DIR, or
@@ -45,7 +46,7 @@ deny() {
 MERGE_REASON="never merge a shepherd PR. Set phase=done and hand the PR back to the user."
 FORCE_REASON="never force-push a shepherd branch. Push follow-up commits so earlier reviews stay valid."
 DELETE_REASON="never delete a shepherd branch on the remote. It holds the PR head reviewers read."
-GATE_REASON="never change or remove the git pre-push gate (core.hooksPath, extensions.worktreeConfig, shepherd/_githooks) on a shepherd branch. Ask the user to do it."
+GATE_REASON="never change or remove the git pre-push gate or shepherd state (core.hooksPath, extensions.worktreeConfig, shepherd/ in the git dir) on a shepherd branch. Ask the user to do it."
 DEEP_REASON="this command nests shells or substitutions too deep to read, and it names a push or a merge. Run the push as a plain command."
 VERIFY_REASON="never skip the git pre-push gate (--no-verify, core.hooksPath, GIT_CONFIG*, GIT_DIR, --git-dir, --work-tree). Clear the tree with the review gate, then push."
 
@@ -83,6 +84,7 @@ is_merge() {
 # Reasons to deny the push in SHEPHERD_GIT_ARGS / SHEPHERD_GIT_CONFIG, or none.
 push_denial() {
   local a cfg flags
+  shopt -u nocasematch
   for cfg in ${SHEPHERD_GIT_CONFIG[@]+"${SHEPHERD_GIT_CONFIG[@]}"}; do
     [[ "$(tr '[:upper:]' '[:lower:]' <<<"${cfg%%=*}")" == core.hookspath ]] && { echo "$VERIFY_REASON"; return; }
   done
@@ -104,6 +106,9 @@ push_denial() {
   done
 }
 
+shopt -s nocasematch
+[[ "$cmd" == *push* || "$cmd" == *merge* || "$cmd" == *config* || "$cmd" == *shepherd* ]] || exit 0
+shopt -u nocasematch
 shepherd_is_active || exit 0
 shepherd_split_command "$cmd"
 push=0 merge=0 bypass=0 push_word=0 reason=""
@@ -118,7 +123,10 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
   fi
   case "${argv[0]##*/}" in
     rm | mv | ln | chmod | unlink | cp)
-      for w in "${argv[@]:1}"; do [[ "$w" == *_githooks* ]] && reason=${reason:-$GATE_REASON}; done ;;
+      for w in "${argv[@]:1}"; do
+        [[ "$w" == *_githooks* || "$w" == shepherd || "$w" == shepherd/* || "$w" == */shepherd || "$w" == */shepherd/* ]] \
+          && reason=${reason:-$GATE_REASON}
+      done ;;
   esac
   if is_merge "${argv[@]}"; then
     merge=1
