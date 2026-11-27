@@ -19,8 +19,9 @@ init [--issue N] [--pr N] [--jira KEY] [--url URL] [--target BRANCH]
 dir | status | get KEY | set KEY=VALUE | set KEY:=JSON ...
 branch-name --summary TEXT [--ref REF] [--type fix|feat|docs|refactor] [--apply]
 decision --title TEXT --decision TEXT --why TEXT [--source URL]
+source FILE[#slice-N]
 policy-base add|remove
-review-start [--plan|--verify]
+review-start [--plan|--verify] [--escalate TEXT]
 review-round --reason TEXT [--user]
 bundle [--plan] [--verified TEXT] [--findings FILE]
 clear --reviewed | --remediated --reason TEXT | --exempt CLASS --reason TEXT
@@ -92,8 +93,10 @@ Before every phase change, run `$SHEPHERD set phase=<phase>`.
     PR use it. Otherwise check that every slice it depends on is done (its acceptance tests exist
     and pass on the target branch), else stop and name the missing slice. Without an anchor, the
     source is every slice. Its acceptance criteria are the starting brief, and its decisions are
-    settled: record them with `$SHEPHERD decision` instead of asking again. Copy it to
-    `source.md`, and use the ticket it names, if any, as `--issue` or `--jira`.
+    settled: record them with `$SHEPHERD decision` instead of asking again. After `init`, write
+    `source.md` with `$SHEPHERD source <path>[#slice-N]` (with an anchor it keeps only that slice
+    and the rules, impact map, decisions, and recommendation), and use the ticket it names, if
+    any, as `--issue` or `--jira`.
   - GitHub issue (a number, `#N`, or a github.com issue URL) →
     `gh issue view <N> --json title,body,comments,labels,state`
   - GitHub PR → `gh pr view <N> --json title,body,headRefName,comments,reviews`, check out its
@@ -152,8 +155,9 @@ For a complex task only. It has its own budget (`max_plan_reviews`, default 2) a
 pre-push reviews. Nothing is committed or pushed.
 
 1. `$SHEPHERD policy-base add`.
-2. `$SHEPHERD review-start --plan` → prints `plan call N of M`. If it says the budget is spent, go
-   to step 6.
+2. `$SHEPHERD review-start --plan [--escalate "<the finding>"]` → prints `plan call N of M` and
+   `model: <model>`. Pass `--escalate` as in the review gate (stage 3, step 6). If it says the
+   budget is spent, go to step 6.
 3. `$SHEPHERD bundle --plan [--findings <file>]` → prints the bundle path.
 4. Dispatch the `shepherd:reviewer` agent with only `BUNDLE: <path>`, `POLICY_BASE: <path>`,
    `plan call N of M`, under the same rules and model choice as the review gate (stage 3, step 5).
@@ -189,19 +193,17 @@ Run before every push, unless the delta is exempt (below).
 
 1. Commit everything you intend to push.
 2. `$SHEPHERD policy-base add` → a clean checkout of the target branch tip (prints its path).
-3. `$SHEPHERD review-start` → reserves the next review and prints `call N of M`. If it says the
-   budget is spent, go to step 7.
+3. `$SHEPHERD review-start [--escalate "<the finding>"]` → reserves the next review and prints
+   `call N of M` and `model: <model>`. If it says the budget is spent, go to step 7.
 4. `$SHEPHERD bundle --verified "<checks you ran and results>" [--findings <file>]` → prints the
    bundle path and records it as `bundle_path`. On a follow-up review, pass the previous findings
    so the reviewer checks them.
 5. Dispatch the `shepherd:reviewer` agent. The prompt contains only:
    `BUNDLE: <path>`, `POLICY_BASE: <path>`, `call N of M`. Never add hints on what to look for, your
    reasoning, or your notes: choosing the reviewer's concerns removes its independence.
-   Model: before a PR exists, in round 1, use the agent's default (light) on call 1 and pass
-   `model: "opus"` on later calls. In every other case (any call once `pr` is set, any call in
-   round 2 or later, and every verify call) use the agent's default and never pass
-   `model: "opus"`. For a verify call, the prompt line is `verify call for round R` instead of
-   `call N of M`.
+   Model: follow the `model:` line `review-start` printed. `default` → pass no `model`; any other
+   value → pass it as `model`. Never choose the model yourself. For a verify call, the prompt line
+   is `verify call for round R` instead of `call N of M`.
    If the agent runs in the background, `$SHEPHERD set phase=waiting_reviewer` and end the turn
    without polling. When its result arrives, `$SHEPHERD set phase=review` and continue.
 6. Triage every finding:
@@ -209,6 +211,9 @@ Run before every push, unless the delta is exempt (below).
    - **Invalid** → dismiss with concrete evidence via `$SHEPHERD decision`.
    - **DECISION** → settle it as in *Decide by default*, record it, and act on it. Interrupt only
      if it is unsettled (see *Interrupts*).
+   - Escalation: if the call returned a `DECISION:` line, or a valid finding on scope, public API,
+     or design (rubric items 1–2, or plan items 1–3), pass `--escalate "<that finding in one line>"` to the next `review-start` in this
+     round (or plan review). It is the only way the next call runs on Opus.
 7. Then:
    Check these in order and take the first that applies:
    - `current at <sha>`, or every finding dismissed with evidence and nothing changed →
@@ -332,7 +337,7 @@ fleet slice the answer may come from the lead instead of the user; treat it the 
 - Merge, force-push, or rewrite pushed history.
 - Implement in a subagent, or give the reviewer anything beyond the bundle, the policy base, and the
   call count.
-- Run more than `max_reviews` calls plus one verify call in a round, or run
-  `review-round --user` without the user's request. Treat the review gate as test execution.
+- Run more than the round's budget (`max_reviews`, or `max_reviews_after_pr` once `pr` is set)
+  plus one verify call in a round, or run `review-round --user` without the user's request. Treat the review gate as test execution.
 - Leave the session with uncommitted changes in an active phase.
 - Commit `.env` files or secrets.
