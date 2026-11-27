@@ -113,12 +113,33 @@ push_denial() {
   done
 }
 
+# A write to core.hooksPath or extensions.worktreeConfig after a `config` word,
+# whatever runs it (`$g config`, `$(command -v git) config`). Reads pass.
+is_gate_config_write() {
+  local seen=0 key=0 write=0 w
+  for w in "$@"; do
+    if (( ! seen )); then
+      [[ "$w" == config ]] && seen=1
+      continue
+    fi
+    case "$w" in
+      --unset* | --add | --replace-all | --remove-section | --rename-section) write=1 ;;
+      -*) ;;
+      *hookspath* | *worktreeconfig*) key=1 ;;
+      *) (( key )) && write=1 ;;
+    esac
+  done
+  (( key && write ))
+}
+
 # A path in a git dir's shepherd/ (branch state, the gate dir) or a
 # config.worktree. Fleet slice worktrees live under shepherd/_fleet/, so that
-# subtree is not state.
+# subtree is not state. A leading /shepherd is the tail of a substituted path
+# (`$(git rev-parse --git-dir)/shepherd`), since the splitter drops `$(...)`.
 is_state_path() {
   [[ ( "$1" == */_fleet/* || "$1" == */_fleet ) && "$1" != *..* ]] && return 1
   [[ "$1" == *_githooks* || "$1" == config.worktree || "$1" == */config.worktree \
+    || "$1" == /shepherd || "$1" == /shepherd/* \
     || "$1" == .git/shepherd || "$1" == .git/shepherd/* || "$1" == */.git/shepherd || "$1" == */.git/shepherd/* \
     || "$1" == */worktrees/*/shepherd || "$1" == */worktrees/*/shepherd/* ]]
 }
@@ -155,12 +176,9 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
       push)
         push=1
         [[ -n "$reason" ]] || reason=$(push_denial) ;;
-      config)
-        for w in ${SHEPHERD_GIT_ARGS[@]+"${SHEPHERD_GIT_ARGS[@]}"}; do
-          [[ "$w" == *hookspath* || "$w" == *worktreeconfig* ]] && reason=${reason:-$GATE_REASON}
-        done ;;
     esac
   fi
+  is_gate_config_write "${argv[@]}" && reason=${reason:-$GATE_REASON}
 done
 (( push_word )) && [[ "$cmd" == *git_config* || "$cmd" == *git_dir* || "$cmd" == *git_common_dir* || "$cmd" == *git_work_tree* ]] && bypass=1
 (( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *push* || "$cmd" == *merge* ]] && deep=1 || deep=0
