@@ -2,7 +2,10 @@
 # PreToolUse hook on Bash. On a branch with shepherd state, for each simple
 # command in the call (see lib/command.sh):
 #   - deny `gh pr merge` and `gh api` merge writes: shepherd never merges
-#   - deny force pushes: they discard what reviewers already read
+#   - deny force pushes and remote deletes: they discard what reviewers already read
+#   - deny `git config` of core.hooksPath or extensions.worktreeConfig, and
+#     rm/mv/cp/ln/chmod/unlink of a shepherd/_githooks path: they turn the git
+#     gate off
 #   - deny a command with a bare `push` word and a `--no-verify`,
 #     `core.hooksPath`, `--git-dir`, or `--work-tree` word, or a call with such
 #     a command that names GIT_CONFIG*, GIT_DIR, GIT_COMMON_DIR, or
@@ -41,6 +44,8 @@ deny() {
 
 MERGE_REASON="never merge a shepherd PR. Set phase=done and hand the PR back to the user."
 FORCE_REASON="never force-push a shepherd branch. Push follow-up commits so earlier reviews stay valid."
+DELETE_REASON="never delete a shepherd branch on the remote. It holds the PR head reviewers read."
+GATE_REASON="never change or remove the git pre-push gate (core.hooksPath, extensions.worktreeConfig, shepherd/_githooks) on a shepherd branch. Ask the user to do it."
 DEEP_REASON="this command nests shells or substitutions too deep to read, and it names a push or a merge. Run the push as a plain command."
 VERIFY_REASON="never skip the git pre-push gate (--no-verify, core.hooksPath, GIT_CONFIG*, GIT_DIR, --git-dir, --work-tree). Clear the tree with the review gate, then push."
 
@@ -86,16 +91,20 @@ push_denial() {
       --*)
         if (( ${#a} >= 8 )) && [[ "--no-verify" == "$a"* ]]; then echo "$VERIFY_REASON"; return; fi
         a=${a%%=*}
-        if (( ${#a} >= 5 )) && [[ "--force-with-lease" == "$a"* || "--force" == "$a"* ]]; then echo "$FORCE_REASON"; return; fi ;;
+        if (( ${#a} >= 5 )) && [[ "--force-with-lease" == "$a"* || "--force" == "$a"* ]]; then echo "$FORCE_REASON"; return; fi
+        if (( ${#a} >= 4 )) && [[ "--delete" == "$a"* ]]; then echo "$DELETE_REASON"; return; fi ;;
       -?*)
         flags=${a#-}
         flags=${flags%%o*}
-        [[ "$flags" == *f* ]] && { echo "$FORCE_REASON"; return; } ;;
+        [[ "$flags" == *f* ]] && { echo "$FORCE_REASON"; return; }
+        [[ "$flags" == *d* ]] && { echo "$DELETE_REASON"; return; } ;;
       +*) echo "$FORCE_REASON"; return ;;
+      :*) echo "$DELETE_REASON"; return ;;
     esac
   done
 }
 
+shepherd_is_active || exit 0
 shepherd_split_command "$cmd"
 push=0 merge=0 bypass=0 push_word=0 reason=""
 shopt -s nocasematch
@@ -107,19 +116,29 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
       [[ "$w" == --no-v* || "$w" == *hookspath* || "$w" == --git-dir* || "$w" == --work-tree* ]] && bypass=1
     done
   fi
+  case "${argv[0]##*/}" in
+    rm | mv | ln | chmod | unlink | cp)
+      for w in "${argv[@]:1}"; do [[ "$w" == *_githooks* ]] && reason=${reason:-$GATE_REASON}; done ;;
+  esac
   if is_merge "${argv[@]}"; then
     merge=1
-  elif shepherd_git_parse "${argv[@]}" && [[ "$SHEPHERD_GIT_SUB" == push ]]; then
-    push=1
-    [[ -n "$reason" ]] || reason=$(push_denial)
+  elif shepherd_git_parse "${argv[@]}"; then
+    case "$SHEPHERD_GIT_SUB" in
+      push)
+        push=1
+        [[ -n "$reason" ]] || reason=$(push_denial) ;;
+      config)
+        for w in ${SHEPHERD_GIT_ARGS[@]+"${SHEPHERD_GIT_ARGS[@]}"}; do
+          [[ "$w" == *hookspath* || "$w" == *worktreeconfig* ]] && reason=${reason:-$GATE_REASON}
+        done ;;
+    esac
   fi
 done
 (( push_word )) && [[ "$cmd" == *git_config* || "$cmd" == *git_dir* || "$cmd" == *git_common_dir* || "$cmd" == *git_work_tree* ]] && bypass=1
 (( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *push* || "$cmd" == *merge* ]] && deep=1 || deep=0
 shopt -u nocasematch
 
-(( push || merge || bypass || deep )) || exit 0
-shepherd_is_active || exit 0
+(( push || merge || bypass || deep )) || [[ -n "$reason" ]] || exit 0
 (( bypass )) && [[ -z "$reason" ]] && reason=$VERIFY_REASON
 (( deep )) && [[ -z "$reason" ]] && reason=$DEEP_REASON
 

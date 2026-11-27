@@ -57,10 +57,15 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'GIT_CONFIG_COUNT=1 $(command -v git) push origin feat/x' 'echo $(echo ")") ; git push -f origin feat/x' \
   "$deep" 'gh -R o/r pr merge 1' 'gh -R o/r api -X PUT repos/o/r/pulls/1/merge' \
   'gh api -X PUT "repos/o/r/pulls/1/merge?x=1"' "\$'gh' pr merge 1" "\$'git' push -f origin feat/x" \
-  'GIT_DIR=$(git rev-parse --git-common-dir) git push origin other:feat/x' 'git --git-dir=../r/.git push origin feat/x'; do
+  'GIT_DIR=$(git rev-parse --git-common-dir) git push origin other:feat/x' 'git --git-dir=../r/.git push origin feat/x' \
+  "zsh -c 'git push --no-verify origin feat/x'" "dash -c 'git push -f origin feat/x'" \
+  'git push origin :feat/x' 'git push --delete origin feat/x' 'git push -d origin feat/x' \
+  'git config --worktree --unset core.hooksPath; ls' 'git config extensions.worktreeConfig false' \
+  'rm -rf .git/worktrees/wt/shepherd/_githooks'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
-for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"'; do
+for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"' \
+  'git push -u origin feat/x' 'git config user.name t'; do
   ok "hook allows: $c" '! denied "$c"'
 done
 ok "push then rm -f is not a force push" '! denied "git push origin feat/x && rm -f x"'

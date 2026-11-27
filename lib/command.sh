@@ -6,7 +6,7 @@
 # command: its words, quotes removed, joined by $SHEPHERD_SEP. A segment ends at
 # a newline, `;`, `&`, `|`, `(`, or `)`; the body of `$(...)` or backticks is a
 # segment of its own. Leading `command`, `env`, `VAR=val`, `sudo`, and `time`
-# are dropped, and the script of `bash -c` / `sh -c` is split in turn.
+# are dropped, and the script of `bash|sh|zsh|dash|ksh -c` is split in turn.
 # It reads command shapes, not full shell syntax: heredoc bodies and arithmetic
 # read as commands, which errs toward a deny.
 
@@ -189,7 +189,7 @@ _shepherd_emit() {
   done
   (( ${#w[@]} )) || return 0
   case "${w[0]##*/}" in
-    bash | sh)
+    bash | sh | zsh | dash | ksh)
       opt=0
       for (( k = 1; k < ${#w[@]}; k++ )); do
         case "${w[k]}" in
