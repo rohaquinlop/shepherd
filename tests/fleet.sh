@@ -10,6 +10,9 @@ sh() { (cd "$1" && shift && bash "$CLI" "$@"); }
 FAKE="$T/fake"; mkdir -p "$FAKE/bin"; echo '[]' > "$FAKE/agents.json"
 cat > "$FAKE/bin/claude" <<EOF
 #!/usr/bin/env bash
+echo "\${CLAUDE_CONFIG_DIR:-unset}" >> "$FAKE/cfg.log"
+[[ -n "\${FAKE_NO_CLAUDE:-}" ]] && { echo called >> "$FAKE/forbidden.log"; exit 1; }
+[[ "\$1" == logs ]] && { printf '%s\t%s\n' "\$PWD" "\$*" >> "$FAKE/claude.log"; seq 300; exit 0; }
 if [[ "\$1" == agents ]]; then
   [[ -n "\${FAKE_FAIL_AGENTS:-}" ]] && exit 1
   [[ "\$*" == *--all* ]] && { cat "$FAKE/agents.json"; exit 0; }
@@ -30,7 +33,9 @@ cat > "$FAKE/bin/gh" <<EOF
 exit 1
 EOF
 chmod +x "$FAKE/bin/claude" "$FAKE/bin/gh"
-export PATH="$FAKE/bin:$PATH" SHEPHERD_FLEET_INTERVAL=1 SHEPHERD_FLEET_START_TIMEOUT=1 CLAUDE_CODE_SESSION_ID=lead-1
+export PATH="$FAKE/bin:$PATH" SHEPHERD_FLEET_INTERVAL=1 SHEPHERD_FLEET_START_TIMEOUT=1 CLAUDE_CODE_SESSION_ID=lead-1 CLAUDE_CONFIG_DIR="$T/cfg"
+claude() { echo called >> "$FAKE/function.log"; }
+export -f claude
 
 A="$T/a"; git init -q -b main "$A"; git -C "$A" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 P="$T/plan.md"
@@ -63,6 +68,7 @@ plan_sed() { sed -i.bak "$1" "$P" && rm "$P.bak"; }
 order() { sh "$A" fleet status --json | jq -c '[.[].slice]'; }
 
 out=$(sh "$A" fleet start "$P" --max 3)
+export CLAUDE_CONFIG_DIR="$T/other"
 ok "start dispatches free slices only" '[[ "$(cut -f2 "$FAKE/claude.log" | grep -o "#slice-[0-9]" | xargs)" == "#slice-1 #slice-4" ]]'
 ok "session runs in its worktree" 'grep -q "^$(wt 1)	--bg -n shepherd-plan-slice-1 /shepherd:run $P#slice-1$" "$FAKE/claude.log"'
 ok "record holds the real session id" '[[ "$(sess 1)" == "$(jq -r ".[] | select(.name == \"shepherd-plan-slice-1\") | .sessionId" "$FAKE/agents.json")" && "$(sh "$A" fleet status --json | jq -r ".[] | select(.slice == 1) | .category")" == running ]]'
@@ -129,6 +135,11 @@ sh "$(wt 4)" set question=again
 ok "a new question after an answer wakes the lead" '[[ "$(sh "$A" fleet wait --timeout 0)" == "slice-4: input/waiting_user -> input/waiting_user" ]]'
 ok "status takes --fleet after the subcommand" 'sh "$A" fleet status --fleet plan --json | jq -e "length > 0" >/dev/null'
 ok "stop fails when claude agents fails" '! FAKE_FAIL_AGENTS=1 sh "$A" fleet stop >/dev/null 2>&1'
+: > "$FAKE/claude.log"
+ok "logs reads the recorded session, last 200 lines by default" '[[ "$(sh "$A" fleet logs 1 | wc -l | xargs)" == 200 && "$(sh "$A" fleet logs 1 --tail 5 | head -1)" == 296 ]] && [[ "$(cut -f2 "$FAKE/claude.log" | sort -u)" == "logs $(sess 1 | cut -c1-8)" ]]'
+ok "attach prints the command with the recorded config" '[[ "$(sh "$A" fleet attach 1)" == "CLAUDE_CONFIG_DIR=$T/cfg claude attach $(sess 1 | cut -c1-8)" ]]'
+ok "status prints the recorded config dir" '[[ "$(sh "$A" fleet status | head -1)" == "config_dir $T/cfg" ]]'
+ok "every claude call used the recorded config, never the shell function" '[[ "$(sort -u "$FAKE/cfg.log")" == "$T/cfg" && ! -e "$FAKE/function.log" ]]'
 ok "self names the slice of its worktree" '[[ "$(sh "$(wt 2)" fleet self | jq -c "[.slug, .slice, .base]")" == '"'"'["plan",2,"fleet/plan/slice-1"]'"'"' ]]'
 ok "self fails outside a slice worktree" '! sh "$A" fleet self >/dev/null 2>&1'
 sh "$A" fleet base 2 main
@@ -171,6 +182,28 @@ git -C "$C" switch -q main
 echo '[{"sessionId":"stale","name":"shepherd-one-slice-1","startedAt":1,"state":"done"}]' > "$FAKE/agents.json"
 ok "no new job within the timeout leaves no record, worktree, or branch" '! FAKE_NO_JOB=1 sh "$C" fleet next 2>/dev/null && [[ "$(jq -r ".slices[\"1\"].session" "$C/.git/shepherd/_fleet/one.json")" == null && $(git -C "$C" worktree list | wc -l) -eq 1 && -z "$(git -C "$C" branch --list "fleet/*")" ]]'
 ok "next succeeds after a failed start" 'sh "$C" fleet next | grep -q "dispatched slice-1"'
+: > "$FAKE/cfg.log"; jq 'del(.config_dir)' "$C/.git/shepherd/_fleet/one.json" > "$T/one.json" && mv "$T/one.json" "$C/.git/shepherd/_fleet/one.json"
+ok "a record without config_dir uses the current env" 'CLAUDE_CONFIG_DIR="$T/env" sh "$C" fleet status >/dev/null && [[ "$(sort -u "$FAKE/cfg.log")" == "$T/env" ]]'
+
+E="$T/e"; git init -q -b main "$E"; git -C "$E" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+erec="$E/.git/shepherd/_fleet/plan.json"
+ewt() { jq -r --arg n "$1" '.slices[$n].worktree' "$erec"; }
+export FAKE_NO_CLAUDE=1
+eout=$(sh "$E" fleet start "$P" --dispatch external --max 3)
+ok "external start prints one line per free slice and runs no claude" '[[ "$(cut -d" " -f1 <<<"$eout" | xargs)" == "slice-1 slice-4" ]] && grep -qx "slice-1 $(ewt 1) /shepherd:run $P#slice-1" <<<"$eout" && [[ ! -e "$FAKE/forbidden.log" && -d "$(ewt 1)" ]]'
+ok "external slices are recorded and running" '[[ "$(jq -r "[.slices[\"1\"].dispatch, .slices[\"4\"].dispatch] | join(\" \")" "$erec")" == "external external" && "$(sh "$E" fleet status --json | jq -r "[.[] | select(.category == \"running\") | .slice] | join(\",\")")" == 1,4 ]]'
+sh "$E" fleet bind 1 app-session-1
+ok "bind records the session ref" '[[ "$(jq -r ".slices[\"1\"].session" "$erec")" == app-session-1 ]] && ! sh "$E" fleet bind 3 x 2>/dev/null'
+(cd "$(ewt 1)" && bash "$CLI" init >/dev/null && bash "$CLI" set phase=waiting_user question=which)
+ok "external status follows the state file" '[[ "$(sh "$E" fleet status --json | jq -r ".[] | select(.slice == 1) | .category")" == input ]]'
+ok "external answer prints the answer instead of resuming" '[[ "$(sh "$E" fleet answer 1 "$T/answer.txt" | tail -1)" == "use option b" ]]'
+ok "logs and attach refuse an external slice" '! sh "$E" fleet logs 1 2>/dev/null && ! sh "$E" fleet attach 1 2>/dev/null'
+ok "stop names external slices and runs no claude" '[[ "$(sh "$E" fleet stop | wc -l | xargs)" == 2 ]]'
+(cd "$(ewt 1)" && bash "$CLI" set phase=done pr:=21)
+sh "$E" fleet next --dispatch external >/dev/null
+ok "both modes pick the same slices" '[[ "$(jq -c "[.slices | to_entries[] | select(.value.session != null) | {k: .key, b: .value.base}]" "$erec")" == "[{\"k\":\"1\",\"b\":\"main\"},{\"k\":\"2\",\"b\":\"fleet/plan/slice-1\"},{\"k\":\"4\",\"b\":\"main\"}]" && ! -e "$FAKE/forbidden.log" ]]'
+unset FAKE_NO_CLAUDE
+ok "launch runs an unbound external slice in the CLI" 'sh "$E" fleet launch 4 | grep -q "dispatched slice-4" && [[ "$(jq -r ".slices[\"4\"].dispatch" "$erec")" == null ]] && ! sh "$E" fleet launch 1 2>/dev/null'
 
 echo "pass=$pass fail=$fail"; rm -rf "$T"
 (( fail == 0 ))
