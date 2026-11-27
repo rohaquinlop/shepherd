@@ -4,9 +4,9 @@
 #   - deny `gh pr merge` and `gh api` merge writes: shepherd never merges
 #   - deny force pushes and remote deletes: they discard what reviewers already read
 #   - deny `git config` of core.hooksPath or extensions.worktreeConfig, and
-#     rm/mv/cp/ln/chmod/unlink of a `shepherd/` path (the gate dir or branch
-#     state) or of config.worktree, or any of them run from inside the
-#     shepherd dir: they turn the git gate off
+#     rm/mv/cp/ln/chmod/unlink of a path in a git dir's shepherd/ (branch
+#     state, the gate dir; not shepherd/_fleet/) or of config.worktree, or any
+#     of them run from inside such a dir: they turn the git gate off
 #   - deny a command with a bare `push` word and a `--no-verify`,
 #     `core.hooksPath`, `--git-dir`, or `--work-tree` word, or a call with such
 #     a command that names GIT_CONFIG*, GIT_DIR, GIT_COMMON_DIR, or
@@ -108,8 +108,18 @@ push_denial() {
   done
 }
 
+# A path in a git dir's shepherd/ (branch state, the gate dir) or a
+# config.worktree. Fleet slice worktrees live under shepherd/_fleet/, so that
+# subtree is not state.
+is_state_path() {
+  [[ "$1" == */_fleet/* || "$1" == */_fleet ]] && return 1
+  [[ "$1" == *_githooks* || "$1" == config.worktree || "$1" == */config.worktree \
+    || "$1" == .git/shepherd || "$1" == .git/shepherd/* || "$1" == */.git/shepherd || "$1" == */.git/shepherd/* \
+    || "$1" == */worktrees/*/shepherd || "$1" == */worktrees/*/shepherd/* ]]
+}
+
 shopt -s nocasematch
-[[ "$PWD" == */shepherd || "$PWD" == */shepherd/* ]] && in_state=1 || in_state=0
+is_state_path "$PWD" && in_state=1 || in_state=0
 (( in_state )) || [[ "$cmd" == *push* || "$cmd" == *merge* || "$cmd" == *config* || "$cmd" == *shepherd* || "$cmd" == *_githooks* ]] || exit 0
 shopt -u nocasematch
 shepherd_is_active || exit 0
@@ -128,8 +138,7 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
     rm | mv | ln | chmod | unlink | cp)
       (( in_state )) && reason=${reason:-$GATE_REASON}
       for w in "${argv[@]:1}"; do
-        [[ "$w" == *_githooks* || "$w" == shepherd || "$w" == shepherd/* || "$w" == */shepherd || "$w" == */shepherd/* \
-          || "$w" == config.worktree || "$w" == */config.worktree ]] && reason=${reason:-$GATE_REASON}
+        is_state_path "$w" && reason=${reason:-$GATE_REASON}
       done ;;
   esac
   if is_merge "${argv[@]}"; then

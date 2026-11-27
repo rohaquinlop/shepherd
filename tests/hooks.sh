@@ -66,7 +66,8 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"' \
-  'git push -u origin feat/x' 'git config user.name t' 'git push -F origin feat/x' 'rm -f shepherd-notes.txt'; do
+  'git push -u origin feat/x' 'git config user.name t' 'git push -F origin feat/x' 'rm -f shepherd-notes.txt' \
+  'rm -f docs/shepherd/x'; do
   ok "hook allows: $c" '! denied "$c"'
 done
 ok "push then rm -f is not a force push" '! denied "git push origin feat/x && rm -f x"'
@@ -92,6 +93,10 @@ ok "no jq: a path naming merge does not deny ls" \
 
 # 4b. the pre-push stub runs a copy of the gate, not the plugin path
 GH="$T/r/.git/worktrees/wt/shepherd/_githooks"
+F="$T/r/.git/shepherd/_fleet/worktrees/s"; git -C "$T/r" worktree add -q -b feat/z "$F" main
+(cd "$F" && bash "$CLI" init >/dev/null 2>&1)
+ok "hook allows rm in a fleet slice worktree under shepherd/_fleet" \
+  '! jq -n --arg d "$F" "{tool_input:{command:\"rm -f notes.txt\"}, cwd:\$d}" | bash "$HOOKS/pre-push.sh" | grep -q "\"deny\""'
 ok "hook denies rm -f pre-push run from inside the gate dir" \
   'jq -n --arg d "$GH" "{tool_input:{command:\"rm -f pre-push\"}, cwd:\$d}" | bash "$HOOKS/pre-push.sh" | grep -q "\"deny\""'
 ok "gate copy installed, stub has no plugin path" '[[ -f "$GH/gate/hooks/git-pre-push.sh" && -f "$GH/gate/lib/state.sh" ]] && ! grep -q "$REPO" "$GH/pre-push"'
