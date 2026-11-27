@@ -84,7 +84,7 @@ The hooks do nothing on branches without shepherd state (except the Stop and Ses
 
 - No orchestrator relays work: the main session implements.
 - The reviewer gets a bundle (brief, diff or plan, PR discussion), not the conversation.
-- At most 3 pre-push reviews per round, plus one verify call that checks fixes to the last round's findings, and at most 2 plan design reviews for a complex task. The first runs on Haiku, and so does every call once the PR exists, every call in a later round, and every verify call.
+- At most 3 pre-push reviews per round (1 per round once the PR exists), plus one verify call that checks fixes to the last round's findings, and at most 2 plan design reviews for a complex task. The first runs on Haiku, and so does every call once the PR exists, every call in a later round, and every verify call. Later calls in round 1 before the PR, and plan call 2, run on Sonnet. A call runs on Opus only when the previous call returned a `DECISION:` or a scope, public API, or design finding (`review-start --escalate`); `review-start` prints the model and records it in `decisions.md`.
 - A new round starts with each comment or CI fix round on the PR, or when you ask shepherd to re-run reviews (`shepherd.sh review-round --user --reason "..."`).
 - Small deltas such as formatter output, test-only fixes, and clean merges skip re-review.
 - CI and hosted review are waited on by background commands, not by polling turns.
@@ -168,8 +168,10 @@ A Jira-based work repo:
 | `target_branch` | Branch PRs target and reviews read rules from | `origin/HEAD` |
 | `verify` | Targeted checks; `{tests}` and `{changed_files}` are filled per change | commands in the repo's `CLAUDE.md`/`AGENTS.md` |
 | `max_reviews` | Pre-push review budget per round | `3` |
+| `max_reviews_after_pr` | Review budget for each round that starts once the PR exists | `1` |
 | `max_plan_reviews` | Plan design reviews for a complex task, separate from `max_reviews` | `2` |
 | `hosted_reviewers` | Bot or user logins whose PR reviews shepherd waits for | none |
+| `bundle_context_lines` | Line cap for the full branch diff a follow-up bundle adds as context (omitted when the new diff covers the branch) | `400` |
 | `branch_pattern` | Branch name; `{type}`, `{ref}`, `{KEY}`, `{number}`, `{slug}`. Also renames a fresh branch a harness created for a new worktree (no commits, no upstream) | `{type}/{ref}-{slug}` |
 | `pr_title` | PR title; `{KEY}`, `{summary}` | the repo's convention |
 
@@ -184,7 +186,7 @@ shepherd reads a story through a Jira or Atlassian MCP server when one is connec
 Per branch, in `shepherd/<branch>/` under the worktree's git dir (`git rev-parse --git-dir`: `.git/` in the main worktree, `.git/worktrees/<name>/` in a linked one). It is outside the work tree, so git never sees it and Claude Code's Bash edit diff does not list it (checked in Claude Code 2.1.328). Each worktree has its own, so parallel sessions in different worktrees never share state:
 
 - `brief.md`: the task contract
-- `source.md`: the Jira story or pasted text, verbatim
+- `source.md`: the Jira story or pasted text, verbatim, or the diagnosis or proposal (`shepherd.sh source FILE#slice-N` keeps only that slice of a proposal)
 - `plan.md`: the implementation plan, never committed
 - `decisions.md`: append-only log of decisions, review dispatches, and exemptions
 - `last-bundle.md`: the last review bundle, kept when the clean checkout is removed
