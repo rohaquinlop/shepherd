@@ -70,6 +70,9 @@ done
 ok "source refuses a missing slice" '! sh source "$T/p.md#slice-9" 2>/dev/null'
 sh source "$T/p.md" >/dev/null
 ok "source without anchor copies the file" 'cmp -s "$T/p.md" "$src"'
+sed -e '/^## Slices$/d' -e 's/^## Next session$/## Decisions/' "$T/p.md" >"$T/q.md"
+sh source "$T/q.md#slice-1" >/dev/null
+ok "slices under a kept section: other slice dropped" '! grep -qF "slice two text" "$src" && grep -qF "slice one text" "$src" && grep -qF "next text" "$src"'
 sh source "$T/p.md#slice-1" >/dev/null
 
 # 2. bundle: slice-only source; context diff omitted or capped
@@ -112,8 +115,9 @@ ok "post-PR budget from config" '[[ "$(sh get max_reviews)" == 2 ]]'
 
 # 5. the run skill names Opus only under the escalation rule
 ok "skill: opus only in escalation" '[[ "$(grep -ci opus "$REPO/skills/run/SKILL.md")" == 1 ]] && grep -i opus "$REPO/skills/run/SKILL.md" | grep -q "only way"'
-sh policy-base add >/dev/null; sh policy-base add >/dev/null; sh policy-base remove
-ok "policy-base add twice then remove leaves no worktree" '[[ $(git -C "$R" worktree list | wc -l) -eq 1 ]]'
+ok "policy-base left no worktree" '[[ $(git -C "$R" worktree list | wc -l) -eq 1 ]]'
+git -C "$R" switch -q -c feat/y; sh init --pr 9 >/dev/null 2>&1
+ok "init --pr uses the post-PR budget" '[[ "$(sh get max_reviews)" == 2 ]]'
 
 echo "pass=$pass fail=$fail"; rm -rf "$T"
 (( fail == 0 ))

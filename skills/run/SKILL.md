@@ -337,7 +337,7 @@ fleet slice the answer may come from the lead instead of the user; treat it the 
 - Merge, force-push, or rewrite pushed history.
 - Implement in a subagent, or give the reviewer anything beyond the bundle, the policy base, and the
   call count.
-- Run more than `max_reviews` calls plus one verify call in a round, or run
-  `review-round --user` without the user's request. Treat the review gate as test execution.
+- Run more than the round's budget (`max_reviews`, or `max_reviews_after_pr` once `pr` is set)
+  plus one verify call in a round, or run `review-round --user` without the user's request. Treat the review gate as test execution.
 - Leave the session with uncommitted changes in an active phase.
 - Commit `.env` files or secrets.

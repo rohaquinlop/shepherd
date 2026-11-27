@@ -73,6 +73,7 @@ cmd_init() {
 
   if [[ ! -f "$dir/state.json" ]]; then
     max=$(shepherd_config max_reviews)
+    [[ -n "$pr" ]] && max=$(shepherd_config max_reviews_after_pr) && max=${max:-1}
     max_plan=$(shepherd_config max_plan_reviews)
     jq -n \
       --arg branch "$(shepherd_branch)" \
@@ -267,9 +268,9 @@ cmd_source() {
     [[ "$anchor" =~ ^slice-[0-9]+$ ]] || die "source: anchor must be slice-N"
     grep -q "^### $anchor:" "$file" || die "source: no '### $anchor:' section in $file"
     awk -v slice="### $anchor:" '
-      /^## / { keep = ($0 ~ /^## (Rules that apply|Impact map|Decisions)$/); sub_keep = 0; started = 1 }
-      /^### / { sub_keep = (index($0, slice) == 1) }
-      !started || keep || sub_keep || /^\*\*Recommendation:\*\*/ { print }
+      /^## / { keep = ($0 ~ /^## (Rules that apply|Impact map|Decisions)$/); inslice = 0; started = 1 }
+      /^### / { inslice = ($0 ~ /^### slice-[0-9]+:/); sub_keep = (index($0, slice) == 1) }
+      !started || (inslice ? sub_keep : keep) || /^\*\*Recommendation:\*\*/ { print }
     ' "$file" >"$out"
   fi
   echo "$out"

@@ -14,6 +14,9 @@ d=$(sh "$T/a" init 2>/dev/null)
 ok "init dir under git dir" '[[ "$d" == "$T/a/.git/shepherd/feat__x" && -f "$d/state.json" ]]'
 ok "no .claude dir created" '[[ ! -e "$T/a/.claude" ]]'
 ok "no exclude entry" '! grep -qs shepherd "$T/a/.git/info/exclude"'
+git init -q --bare "$T/a-origin.git"; git -C "$T/a" remote add origin "$T/a-origin.git"; git -C "$T/a" push -q origin main
+sh "$T/a" policy-base add >/dev/null; sh "$T/a" policy-base add >/dev/null; sh "$T/a" policy-base remove
+ok "policy-base add twice then remove leaves no worktree" '[[ $(git -C "$T/a" worktree list | wc -l) -eq 1 ]]'
 
 # 2. diagnose + guard (main worktree)
 out=$(sh "$T/a" diagnose start --slug probe)
