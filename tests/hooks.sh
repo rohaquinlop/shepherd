@@ -62,7 +62,7 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'git push origin :feat/x' 'git push --delete origin feat/x' 'git push -d origin feat/x' \
   'git config --worktree --unset core.hooksPath; ls' 'git config extensions.worktreeConfig false' \
   'rm -rf .git/worktrees/wt/shepherd/_githooks' 'rm -f ../r/.git/worktrees/wt/shepherd/feat__x/state.json' \
-  'rm -rf ../r/.git/worktrees/wt/shepherd'; do
+  'rm -rf ../r/.git/worktrees/wt/shepherd' 'rm -f ../r/.git/worktrees/wt/config.worktree'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"' \
@@ -92,6 +92,8 @@ ok "no jq: a path naming merge does not deny ls" \
 
 # 4b. the pre-push stub runs a copy of the gate, not the plugin path
 GH="$T/r/.git/worktrees/wt/shepherd/_githooks"
+ok "hook denies rm -f pre-push run from inside the gate dir" \
+  'jq -n --arg d "$GH" "{tool_input:{command:\"rm -f pre-push\"}, cwd:\$d}" | bash "$HOOKS/pre-push.sh" | grep -q "\"deny\""'
 ok "gate copy installed, stub has no plugin path" '[[ -f "$GH/gate/hooks/git-pre-push.sh" && -f "$GH/gate/lib/state.sh" ]] && ! grep -q "$REPO" "$GH/pre-push"'
 
 # 5. other hooks chain; a branch without state passes the git gate

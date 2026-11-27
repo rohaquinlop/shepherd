@@ -5,8 +5,8 @@
 #   - deny force pushes and remote deletes: they discard what reviewers already read
 #   - deny `git config` of core.hooksPath or extensions.worktreeConfig, and
 #     rm/mv/cp/ln/chmod/unlink of a `shepherd/` path (the gate dir or branch
-#     state): they turn the git gate off
-# Calls whose text names none of push, merge, config, or shepherd exit first.
+#     state) or of config.worktree, or any of them run from inside the
+#     shepherd dir: they turn the git gate off
 #   - deny a command with a bare `push` word and a `--no-verify`,
 #     `core.hooksPath`, `--git-dir`, or `--work-tree` word, or a call with such
 #     a command that names GIT_CONFIG*, GIT_DIR, GIT_COMMON_DIR, or
@@ -14,7 +14,9 @@
 #     It needs no `git` word, so `$g push` and `$(command -v git) push` count
 #   - deny `git push` unless the worktree is clean and HEAD's tree is the tree
 #     the review gate cleared (see `shepherd clear`)
-# Every other command, and every branch without state, passes through.
+# Every other command, and every branch without state, passes through. A call
+# whose text names none of push, merge, config, shepherd, or _githooks, run
+# outside the shepherd dir, exits before any git command.
 # Without jq it cannot read the call, so on a branch with state (read from the
 # hook's own cwd) it denies any call that names a push or a merge.
 
@@ -107,7 +109,8 @@ push_denial() {
 }
 
 shopt -s nocasematch
-[[ "$cmd" == *push* || "$cmd" == *merge* || "$cmd" == *config* || "$cmd" == *shepherd* ]] || exit 0
+[[ "$PWD" == */shepherd || "$PWD" == */shepherd/* ]] && in_state=1 || in_state=0
+(( in_state )) || [[ "$cmd" == *push* || "$cmd" == *merge* || "$cmd" == *config* || "$cmd" == *shepherd* || "$cmd" == *_githooks* ]] || exit 0
 shopt -u nocasematch
 shepherd_is_active || exit 0
 shepherd_split_command "$cmd"
@@ -123,9 +126,10 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
   fi
   case "${argv[0]##*/}" in
     rm | mv | ln | chmod | unlink | cp)
+      (( in_state )) && reason=${reason:-$GATE_REASON}
       for w in "${argv[@]:1}"; do
-        [[ "$w" == *_githooks* || "$w" == shepherd || "$w" == shepherd/* || "$w" == */shepherd || "$w" == */shepherd/* ]] \
-          && reason=${reason:-$GATE_REASON}
+        [[ "$w" == *_githooks* || "$w" == shepherd || "$w" == shepherd/* || "$w" == */shepherd || "$w" == */shepherd/* \
+          || "$w" == config.worktree || "$w" == */config.worktree ]] && reason=${reason:-$GATE_REASON}
       done ;;
   esac
   if is_merge "${argv[@]}"; then
