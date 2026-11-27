@@ -146,7 +146,7 @@ gh_write() {
   [[ " ${SHEPHERD_GH_POS[*]} " == *" graphql "* ]] || return 0
   for a in "$@"; do
     [[ "$a" == *mutation* || "$a" == *=@* || "$a" == --input* ]] && return 0
-    [[ "$a" == query=*'{'* ]] && literal=1
+    [[ "$a" == query=*'{'* && "$a" != *'$'* && "$a" != *'`'* ]] && literal=1
   done
   (( ! literal ))
 }
