@@ -151,7 +151,8 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   'gh api graphql -f query="{ viewer }" -fquery="$M"' 'gh api graphql -f query="{ viewer }" --raw-field=query="$(cat m)"' \
   'gh api graphql -f query="{ viewer }" -f "$K=$V"' 'gh api graphql -f query="{ viewer }" -f=query="$M"' \
   'gh api graphql -f query="{ viewer }" -if "$K=$V"' 'gh api graphql -f query="{ viewer }" -iFquery="$M"' \
-  'gh api graphql -R $R -f query="{ viewer { login } }"' 'gh api graphql -f query="{ viewer }" -f q=x $X'; do
+  'gh api graphql -R $R -f query="{ viewer { login } }"' 'gh api graphql -f query="{ viewer }" -f q=x $X' \
+  'sh -c "gh api graphql -f query=\"{ viewer }\"$(cat m)"' 'eval "gh api graphql -f query=\"{ viewer }\"$(cat m)"'; do
   ok "guard denies: ${c//$'\n'/\\n}" 'gdenied "$c"'
 done
 for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit -m x" \

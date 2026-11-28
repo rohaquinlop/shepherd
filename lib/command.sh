@@ -222,6 +222,7 @@ _shepherd_substitutions() {
 }
 
 _shepherd_end_word() {
+  (( ${sub_inherit:-0} )) && wsub=1
   if (( inword )); then
     if (( brace )); then
       _shepherd_brace
@@ -282,8 +283,19 @@ _shepherd_end_segment() {
   words=() marks=()
 }
 
+# In _shepherd_emit, before a re-split of w[FROM] to w[TO-1] (eval, env -S,
+# sh -c): when one of them held a substitution, mark every word the re-split
+# makes, since the substitution body is already gone from the text.
+_shepherd_inherit() {
+  local j off=$((${#m[@]} - ${#w[@]}))
+  for (( j = $1; j < $2; j++ )); do
+    [[ "${m[off + j]:-0}" == 1 ]] && sub_inherit=1
+  done
+  return 0
+}
+
 _shepherd_emit() {
-  local depth="$1" k opt
+  local depth="$1" k opt sub_inherit=${sub_inherit:-0}
   local -a m
   read -ra m <<<"$2"
   shift 2
@@ -306,6 +318,7 @@ _shepherd_emit() {
           esac
         done ;;
       eval)
+        _shepherd_inherit 1 ${#w[@]}
         _shepherd_split "${w[*]:1}" $((depth + 1)); return 0 ;;
       command | time | nice)
         w=("${w[@]:1}")
@@ -337,6 +350,7 @@ _shepherd_emit() {
         while [[ "${w[0]:-}" == -* ]]; do
           case "${w[0]}" in
             -S | --split-string)
+              _shepherd_inherit 1 2
               _shepherd_split "${w[1]:-}" $((depth + 1)); return 0 ;;
             -u | -C | --unset | --chdir) w=("${w[@]:2}") ;;
             *) w=("${w[@]:1}") ;;
@@ -366,6 +380,7 @@ _shepherd_emit() {
         esac
       done
       if (( opt && k < ${#w[@]} )); then
+        _shepherd_inherit $k $((k + 1))
         _shepherd_split "${w[k]}" $((depth + 1))
         return 0
       fi ;;
