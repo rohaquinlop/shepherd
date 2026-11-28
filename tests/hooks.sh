@@ -72,14 +72,16 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'git config --rename-section x extensions' 'git config remove-section core' 'git config unset core.hooksPath' \
   'git config core.hooksPath 2>&1 /x' 'git config --comment --get core.hooksPath /x' 'git config -f get core.hooksPath /x' \
   'rm -rf $(git rev-parse --git-dir)//shepherd' 'rm -rf $(git rev-parse --git-dir)/./shepherd' \
-  'rm -rf $(git rev-parse --git-dir)/x/../shepherd'; do
+  'rm -rf $(git rev-parse --git-dir)/x/../shepherd' 'git {push,} --force origin feat/x' 'gh pr {merge,} 1' \
+  'gh pr mer{g,}e 1' 'rm -rf .git/worktrees/wt/{shepherd,x}' '$(x)sudo git {push,} --force origin feat/x' \
+  '$(x)env git push -f origin feat/x' 'git push {1..9999} origin feat/x' 'git pu{s,}h {1..9999} origin feat/x'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"' \
   'git push -u origin feat/x' 'git config user.name t' 'git push -F origin feat/x' 'rm -f shepherd-notes.txt' \
   'rm -f docs/shepherd/x' 'git config --get core.hooksPath' 'git config --worktree core.hooksPath' \
   'git config --get core.hooksPath 2>&1' 'git config get core.hooksPath 2>&1' 'git config --remove-section alias' \
-  'rm -rf $(git rev-parse --git-dir)/../shepherd'; do
+  'rm -rf $(git rev-parse --git-dir)/../shepherd' 'git push origin "{a,b}"' 'mkdir -p a/{b,c}'; do
   ok "hook allows: $c" '! denied "$c"'
 done
 ok "push then rm -f is not a force push" '! denied "git push origin feat/x && rm -f x"'
@@ -143,13 +145,17 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   "git -C $scr/repo --git-dir=$T/r/.git commit -m x" "git -C $scr/nope commit -m x" "bash -c 'cd $scr/repo'; git commit -m x" \
   "git -C $scr/repo -c core.worktree=$T/r clean -fdx" "GIT_CONFIG_COUNT=1 git -C $scr/repo clean -fdx" \
   "git -C $scr/wt clean -fdx" "git -C $scr/repo push origin main" 'gh api graphql -F query=@m.graphql' 'gh api graphql -f query="${Q}{ x }"' 'gh api graphql -f query="query Q { $(cat m) }"' 'gh api graphql -f query="query Q { `cat m` }"' \
-  'gh api graphql -f query="$(cat m.graphql)"' "$deep" 'gh pr close 1' 'gh issue create -t x' 'git branch -f x'; do
+  'gh api graphql -f query="$(cat m.graphql)"' "$deep" 'gh pr close 1' 'gh issue create -t x' 'git branch -f x' \
+  'git {commit,} -m x' 'gh issue {comment,} 1 -b x' 'git log {1..9999}' \
+  'gh api graphql -f query="{ viewer }" -f query="$M"' 'gh api graphql -f query="{ viewer }" -F query="$M"'; do
   ok "guard denies: ${c//$'\n'/\\n}" 'gdenied "$c"'
 done
 for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit -m x" \
   "cat > $scr/n.md <<'EOF'"$'\ngit commit -m x\nEOF' $'cat <<-EOF\n\tgit commit -m x\n\tEOF\necho done' \
   'git log --grep commit' 'git tag' 'git tag -l "v*"' 'git branch -a' 'gh api repos/o/r/pulls' \
-  'gh api graphql -f query="{ viewer { login } }"' 'gh issue view 1' 'git tag --sort refname' 'echo "git commit -m x"' 'git status'; do
+  'gh api graphql -f query="{ viewer { login } }"' 'gh issue view 1' 'git tag --sort refname' 'echo "git commit -m x"' 'git status' \
+  'echo $HOME; gh api graphql -f query="{ viewer { login } }"' 'gh api graphql -R $R -f query="{ viewer { login } }"' \
+  'git log --format="{a,b}"' 'find . -exec gh pr view {} \;'; do
   ok "guard allows: ${c//$'\n'/\\n}" '! gdenied "$c"'
 done
 ok "guard allows git run from a scratch repo cwd" '! gdenied "git commit -m x" "$scr/repo"'
