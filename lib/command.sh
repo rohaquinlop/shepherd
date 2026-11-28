@@ -13,6 +13,7 @@
 # per word joined by $SHEPHERD_SEP: 1 when the word held a `$(...)`, backticks,
 # or `$'...'` / `$"..."`, so its text is not what bash passes. A `$(...)` that is
 # a word of its own marks every word of its segment.
+# SHEPHERD_SPLIT_WORDS has every word read, before any is dropped.
 # It reads command shapes, not full shell syntax: heredoc bodies and arithmetic
 # read as commands, which errs toward a deny.
 #
@@ -27,6 +28,7 @@ SHEPHERD_SPLIT_DEPTH=4
 shepherd_split_command() {
   SHEPHERD_SEGMENTS=()
   SHEPHERD_SEGMENT_SUBST=()
+  SHEPHERD_SPLIT_WORDS=()
   SHEPHERD_SPLIT_TRUNCATED=0
   SHEPHERD_SPLIT_HEREDOC=""
   [[ "${2:-}" == --heredoc-data ]] && SHEPHERD_SPLIT_HEREDOC=data
@@ -291,6 +293,7 @@ _shepherd_brace() {
 _shepherd_end_segment() {
   _shepherd_end_word
   if (( ${#words[@]} )); then
+    SHEPHERD_SPLIT_WORDS+=("${words[@]}")
     (( segsub )) && marks=("${marks[@]/*/1}")
     _shepherd_emit "$depth" "${marks[*]}" "${words[@]}"
   fi
@@ -458,4 +461,16 @@ shepherd_gh_parse() {
     "") SHEPHERD_GH_WRITE=$fields ;;
     *) SHEPHERD_GH_WRITE=1 ;;
   esac
+}
+
+# shepherd_names_git_env CMD: CMD, or a word the last shepherd_split_command
+# read (brace words expanded, quotes removed, `VAR=val` words kept), names
+# GIT_CONFIG*, GIT_DIR, GIT_COMMON_DIR, or GIT_WORK_TREE. It matches under the
+# caller's nocasematch.
+shepherd_names_git_env() {
+  local w
+  for w in "$1" ${SHEPHERD_SPLIT_WORDS[@]+"${SHEPHERD_SPLIT_WORDS[@]}"}; do
+    [[ "$w" == *GIT_CONFIG* || "$w" == *GIT_DIR* || "$w" == *GIT_COMMON_DIR* || "$w" == *GIT_WORK_TREE* ]] && return 0
+  done
+  return 1
 }

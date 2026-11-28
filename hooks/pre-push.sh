@@ -12,7 +12,9 @@
 #   - deny a command with a bare `push` word and a `--no-verify`,
 #     `core.hooksPath`, `--git-dir`, or `--work-tree` word, or a call with such
 #     a command that names GIT_CONFIG*, GIT_DIR, GIT_COMMON_DIR, or
-#     GIT_WORK_TREE: they can skip the git pre-push gate (hooks/git-pre-push.sh).
+#     GIT_WORK_TREE in its text or its split words (a brace word or quotes
+#     can build the name): they can skip the git pre-push gate
+#     (hooks/git-pre-push.sh).
 #     It needs no `git` word, so `$g push` and `$(command -v git) push` count
 #   - deny `git push` unless the worktree is clean and HEAD's tree is the tree
 #     the review gate cleared (see `shepherd clear`)
@@ -207,7 +209,7 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
   fi
   is_gate_config_write "${argv[@]}" && reason=${reason:-$GATE_REASON}
 done
-(( push_word )) && [[ "$cmd" == *git_config* || "$cmd" == *git_dir* || "$cmd" == *git_common_dir* || "$cmd" == *git_work_tree* ]] && bypass=1
+(( push_word )) && shepherd_names_git_env "$cmd" && bypass=1
 (( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *push* || "$cmd" == *merge* || "$cmd" == *'{'* ]] && deep=1 || deep=0
 shopt -u nocasematch
 
