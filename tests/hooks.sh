@@ -67,12 +67,19 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'rm -rf .git/worktrees/wt/shepherd/_fleet/../_githooks' '$(command -v gh) pr merge 1' 'g=gh; $g pr merge 1' \
   'caffeinate -i gh pr merge 1' 'find . -exec gh pr merge {} \;' '$(command -v gh) api -X PUT repos/o/r/pulls/1/merge' \
   'rm -rf $(git rev-parse --git-dir)/shepherd' 'g=git; $g config --unset core.hooksPath' \
-  '$(command -v git) config --worktree --unset core.hooksPath' 'git config --worktree core.hooksPath /tmp/x'; do
+  '$(command -v git) config --worktree --unset core.hooksPath' 'git config --worktree core.hooksPath /tmp/x' \
+  'git config --worktree --remove-section core' 'git config --worktree --rename-section core x' 'git config --worktree --rename-section x core' \
+  'git config --rename-section x extensions' 'git config remove-section core' 'git config unset core.hooksPath' \
+  'git config core.hooksPath 2>&1 /x' 'git config --comment --get core.hooksPath /x' 'git config -f get core.hooksPath /x' \
+  'rm -rf $(git rev-parse --git-dir)//shepherd' 'rm -rf $(git rev-parse --git-dir)/./shepherd' \
+  'rm -rf $(git rev-parse --git-dir)/x/../shepherd'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"' \
   'git push -u origin feat/x' 'git config user.name t' 'git push -F origin feat/x' 'rm -f shepherd-notes.txt' \
-  'rm -f docs/shepherd/x' 'git config --get core.hooksPath' 'git config --worktree core.hooksPath'; do
+  'rm -f docs/shepherd/x' 'git config --get core.hooksPath' 'git config --worktree core.hooksPath' \
+  'git config --get core.hooksPath 2>&1' 'git config get core.hooksPath 2>&1' 'git config --remove-section alias' \
+  'rm -rf $(git rev-parse --git-dir)/../shepherd'; do
   ok "hook allows: $c" '! denied "$c"'
 done
 ok "push then rm -f is not a force push" '! denied "git push origin feat/x && rm -f x"'
