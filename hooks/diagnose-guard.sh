@@ -133,11 +133,12 @@ git_write() {
 }
 
 # A gh command that writes to a PR, an issue, or the API. graphql queries are
-# POSTs too, so a graphql call passes only when every `query=` word is literal
-# (a `{`, no `$` or backtick, no `$(...)` per marks) and no word has a
-# mutation, an `@file` value, or --input.
+# POSTs too, so a graphql call passes only when every field (`-f`, `-F`,
+# `--field`, `--raw-field`, attached or not) has a plain key, its `query` fields
+# are literal (a `{`, no `$` or backtick), no field held a `$(...)` or `$'...'`
+# per marks, and no word has a mutation, an `@file` value, or --input.
 gh_write() {
-  local a k=0 query=0
+  local a kv prev="" k=0 query=0
   shepherd_gh_parse "$@"
   case "${SHEPHERD_GH_POS[1]:-} ${SHEPHERD_GH_POS[2]:-}" in
     "pr create" | "pr merge" | "pr edit" | "pr comment" | "pr review" | "pr close" | "pr ready" | "pr reopen" \
@@ -147,10 +148,19 @@ gh_write() {
   [[ " ${SHEPHERD_GH_POS[*]} " == *" graphql "* ]] || return 0
   for a in "$@"; do
     [[ "$a" == *mutation* || "$a" == *=@* || "$a" == --input* ]] && return 0
-    if [[ "$a" == query=* ]]; then
-      [[ "$a" == *'{'* && "$a" != *'$'* && "$a" != *'`'* && "${marks[k]:-0}" == 0 ]] || return 0
-      query=1
+    case "$prev" in -f | -F | --field | --raw-field) kv=$a ;; *) kv="" ;; esac
+    case "$a" in
+      --field=* | --raw-field=*) kv=${a#*=} ;;
+      -f?* | -F?*) kv=${a:2} ;;
+    esac
+    if [[ -n "$kv" ]]; then
+      [[ "${kv%%=*}" != *'$'* && "${kv%%=*}" != *'`'* && "${marks[k]:-0}" == 0 ]] || return 0
+      if [[ "${kv%%=*}" == query ]]; then
+        [[ "$kv" == *'{'* && "$kv" != *'$'* && "$kv" != *'`'* ]] || return 0
+        query=1
+      fi
     fi
+    prev=$a
     k=$((k + 1))
   done
   (( ! query ))

@@ -147,7 +147,9 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   "git -C $scr/wt clean -fdx" "git -C $scr/repo push origin main" 'gh api graphql -F query=@m.graphql' 'gh api graphql -f query="${Q}{ x }"' 'gh api graphql -f query="query Q { $(cat m) }"' 'gh api graphql -f query="query Q { `cat m` }"' \
   'gh api graphql -f query="$(cat m.graphql)"' "$deep" 'gh pr close 1' 'gh issue create -t x' 'git branch -f x' \
   'git {commit,} -m x' 'gh issue {comment,} 1 -b x' 'git log {1..9999}' \
-  'gh api graphql -f query="{ viewer }" -f query="$M"' 'gh api graphql -f query="{ viewer }" -F query="$M"' "gh api graphql -f query=\$'\\x6dutation { viewer { login } }'"; do
+  'gh api graphql -f query="{ viewer }" -f query="$M"' 'gh api graphql -f query="{ viewer }" -F query="$M"' "gh api graphql -f query=\$'\\x6dutation { viewer { login } }'" \
+  'gh api graphql -f query="{ viewer }" -fquery="$M"' 'gh api graphql -f query="{ viewer }" --raw-field=query="$(cat m)"' \
+  'gh api graphql -f query="{ viewer }" -f "$K=$V"'; do
   ok "guard denies: ${c//$'\n'/\\n}" 'gdenied "$c"'
 done
 for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit -m x" \
@@ -155,7 +157,8 @@ for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit
   'git log --grep commit' 'git tag' 'git tag -l "v*"' 'git branch -a' 'gh api repos/o/r/pulls' \
   'gh api graphql -f query="{ viewer { login } }"' 'gh issue view 1' 'git tag --sort refname' 'echo "git commit -m x"' 'git status' \
   'echo $HOME; gh api graphql -f query="{ viewer { login } }"' 'gh api graphql -R $R -f query="{ viewer { login } }"' \
-  'git log --format="{a,b}"' 'find . -exec gh pr view {} \;'; do
+  'git log --format="{a,b}"' 'find . -exec gh pr view {} \;' 'gh api graphql -fquery="{ viewer { login } }"' \
+  'gh api graphql --raw-field=query="{ viewer { login } }" -F n=1'; do
   ok "guard allows: ${c//$'\n'/\\n}" '! gdenied "$c"'
 done
 ok "guard allows git run from a scratch repo cwd" '! gdenied "git commit -m x" "$scr/repo"'
