@@ -149,14 +149,16 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   'git {commit,} -m x' 'gh issue {comment,} 1 -b x' 'git log {1..9999}' \
   'gh api graphql -f query="{ viewer }" -f query="$M"' 'gh api graphql -f query="{ viewer }" -F query="$M"' "gh api graphql -f query=\$'\\x6dutation { viewer { login } }'" \
   'gh api graphql -f query="{ viewer }" -fquery="$M"' 'gh api graphql -f query="{ viewer }" --raw-field=query="$(cat m)"' \
-  'gh api graphql -f query="{ viewer }" -f "$K=$V"'; do
+  'gh api graphql -f query="{ viewer }" -f "$K=$V"' 'gh api graphql -f query="{ viewer }" -f=query="$M"' \
+  'gh api graphql -f query="{ viewer }" -if "$K=$V"' 'gh api graphql -f query="{ viewer }" -iFquery="$M"' \
+  'gh api graphql -R $R -f query="{ viewer { login } }"' 'gh api graphql -f query="{ viewer }" -f q=x $X'; do
   ok "guard denies: ${c//$'\n'/\\n}" 'gdenied "$c"'
 done
 for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit -m x" \
   "cat > $scr/n.md <<'EOF'"$'\ngit commit -m x\nEOF' $'cat <<-EOF\n\tgit commit -m x\n\tEOF\necho done' \
   'git log --grep commit' 'git tag' 'git tag -l "v*"' 'git branch -a' 'gh api repos/o/r/pulls' \
   'gh api graphql -f query="{ viewer { login } }"' 'gh issue view 1' 'git tag --sort refname' 'echo "git commit -m x"' 'git status' \
-  'echo $HOME; gh api graphql -f query="{ viewer { login } }"' 'gh api graphql -R $R -f query="{ viewer { login } }"' \
+  'echo $HOME; gh api graphql -f query="{ viewer { login } }"' \
   'git log --format="{a,b}"' 'find . -exec gh pr view {} \;' 'gh api graphql -fquery="{ viewer { login } }"' \
   'gh api graphql --raw-field=query="{ viewer { login } }" -F n=1'; do
   ok "guard allows: ${c//$'\n'/\\n}" '! gdenied "$c"'
