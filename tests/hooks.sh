@@ -73,7 +73,7 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'git config core.hooksPath 2>&1 /x' 'git config --comment --get core.hooksPath /x' 'git config -f get core.hooksPath /x' \
   'rm -rf $(git rev-parse --git-dir)//shepherd' 'rm -rf $(git rev-parse --git-dir)/./shepherd' \
   'rm -rf $(git rev-parse --git-dir)/x/../shepherd' 'git {push,} --force origin feat/x' 'gh pr {merge,} 1' \
-  'gh pr mer{g,}e 1' 'rm -rf .git/worktrees/wt/{shepherd,x}' '$(x)sudo git {push,} --force origin feat/x' \
+  'gh pr mer{g,}e 1' 'rm -rf .git/worktrees/wt/sh{e,}pherd' '$(x)sudo git {push,} --force origin feat/x' \
   '$(x)env git push -f origin feat/x' 'git push {1..9999} origin feat/x' 'git pu{s,}h {1..9999} origin feat/x'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
@@ -152,7 +152,9 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   'gh api graphql -f query="{ viewer }" -f "$K=$V"' 'gh api graphql -f query="{ viewer }" -f=query="$M"' \
   'gh api graphql -f query="{ viewer }" -if "$K=$V"' 'gh api graphql -f query="{ viewer }" -iFquery="$M"' \
   'gh api graphql -R $R -f query="{ viewer { login } }"' 'gh api graphql -f query="{ viewer }" -f q=x $X' \
-  'sh -c "gh api graphql -f query=\"{ viewer }\"$(cat m)"' 'eval "gh api graphql -f query=\"{ viewer }\"$(cat m)"'; do
+  'sh -c "gh api graphql -f query=\"{ viewer }\"$(cat m)"' 'eval "gh api graphql -f query=\"{ viewer }\"$(cat m)"' \
+  'gh api graphql -f query="{ viewer }" $(echo -F query=mutation)' 'gh api graphql -f query="{ viewer }" `echo -F query=mutation`' \
+  'gh api graphql $(echo -F query=mutation) -f query="{ viewer }"'; do
   ok "guard denies: ${c//$'\n'/\\n}" 'gdenied "$c"'
 done
 for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit -m x" \
@@ -161,7 +163,7 @@ for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit
   'gh api graphql -f query="{ viewer { login } }"' 'gh issue view 1' 'git tag --sort refname' 'echo "git commit -m x"' 'git status' \
   'echo $HOME; gh api graphql -f query="{ viewer { login } }"' \
   'git log --format="{a,b}"' 'find . -exec gh pr view {} \;' 'gh api graphql -fquery="{ viewer { login } }"' \
-  'gh api graphql --raw-field=query="{ viewer { login } }" -F n=1'; do
+  'gh api graphql --raw-field=query="{ viewer { login } }" -F n=1' 'git log {a,b,c,d,e,f,g,h,i,j,k,l}'; do
   ok "guard allows: ${c//$'\n'/\\n}" '! gdenied "$c"'
 done
 ok "guard allows git run from a scratch repo cwd" '! gdenied "git commit -m x" "$scr/repo"'

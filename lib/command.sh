@@ -11,7 +11,8 @@
 # would make more than 1024 words, or has a step, stays literal and sets
 # SHEPHERD_SPLIT_TRUNCATED. SHEPHERD_SEGMENT_SUBST has, per segment, one 0/1
 # per word joined by $SHEPHERD_SEP: 1 when the word held a `$(...)`, backticks,
-# or `$'...'` / `$"..."`, so its text is not what bash passes.
+# or `$'...'` / `$"..."`, so its text is not what bash passes. A `$(...)` that is
+# a word of its own marks every word of its segment.
 # It reads command shapes, not full shell syntax: heredoc bodies and arithmetic
 # read as commands, which errs toward a deny.
 #
@@ -35,7 +36,7 @@ shepherd_split_command() {
 
 _shepherd_split() {
   local s="$1" depth="$2" n=${#1} i=0 c q="" word="" inword=0 line_seg=${#SHEPHERD_SEGMENTS[@]}
-  local upos="" uopen=0 udollar=-1 brace=0 wsub=0
+  local upos="" uopen=0 udollar=-1 brace=0 wsub=0 segsub=0
   local -a words=() marks=() heredocs=()
   if (( depth > SHEPHERD_SPLIT_DEPTH )); then
     SHEPHERD_SPLIT_TRUNCATED=1
@@ -223,6 +224,7 @@ _shepherd_substitutions() {
 
 _shepherd_end_word() {
   (( ${sub_inherit:-0} )) && wsub=1
+  (( wsub && ! inword )) && segsub=1
   if (( inword )); then
     if (( brace )); then
       _shepherd_brace
@@ -236,21 +238,30 @@ _shepherd_end_word() {
 # Add the words bash makes of the brace word in `word`. Only the unquoted chars
 # in upos stay unescaped, so eval does brace expansion and nothing else.
 _shepherd_brace() {
-  local e="" k ch len a b commas=0 total=1 rest
+  local e="" k ch len a b total=1 rest
   local re='\{(-?[0-9]+|[A-Za-z])\.\.(-?[0-9]+|[A-Za-z])(\.\.-?[0-9]+)?\}'
-  local -a exp=()
+  local -a exp=() groups=()
   for (( k = 0; k < ${#word}; k++ )); do
     ch=${word:k:1}
     if [[ "$upos" == *" $k "* ]]; then
       e+=$ch
-      [[ "$ch" == , ]] && commas=$((commas + 1))
+      case "$ch" in
+        '{') groups+=(1) ;;
+        ,) (( ${#groups[@]} )) && groups[${#groups[@]} - 1]=$((groups[${#groups[@]} - 1] + 1)) ;;
+        '}')
+          if (( ${#groups[@]} )); then
+            total=$((total * groups[${#groups[@]} - 1]))
+            (( total > 1024 )) && total=1025
+            unset "groups[${#groups[@]} - 1]"
+          fi ;;
+      esac
     elif [[ "$ch" == $'\n' ]]; then
       e+="'"$'\n'"'"
     else
       e+="\\$ch"
     fi
   done
-  (( commas > 10 )) && total=0 || total=$((1 << commas))
+  (( total > 1024 )) && total=0
   rest=$e
   while (( total )) && [[ "$rest" =~ $re ]]; do
     a=${BASH_REMATCH[1]} b=${BASH_REMATCH[2]}
@@ -279,8 +290,11 @@ _shepherd_brace() {
 
 _shepherd_end_segment() {
   _shepherd_end_word
-  (( ${#words[@]} )) && _shepherd_emit "$depth" "${marks[*]}" "${words[@]}"
-  words=() marks=()
+  if (( ${#words[@]} )); then
+    (( segsub )) && marks=("${marks[@]/*/1}")
+    _shepherd_emit "$depth" "${marks[*]}" "${words[@]}"
+  fi
+  words=() marks=() segsub=0
 }
 
 # In _shepherd_emit, before a re-split of w[FROM] to w[TO-1] (eval, env -S,
