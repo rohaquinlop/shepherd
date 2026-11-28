@@ -17,8 +17,9 @@
 #   - deny `git push` unless the worktree is clean and HEAD's tree is the tree
 #     the review gate cleared (see `shepherd clear`)
 # Every other command, and every branch without state, passes through. A call
-# whose text names none of push, merge, config, shepherd, or _githooks, run
-# outside the shepherd dir, exits before any git command.
+# whose text names none of push, merge, config, shepherd, or _githooks, and has
+# no `{...}` (a brace word can spell them), run outside the shepherd dir, exits
+# before any git command.
 # Without jq it cannot read the call, so on a branch with state (read from the
 # hook's own cwd) it denies any call that names a push or a merge.
 
@@ -51,7 +52,7 @@ MERGE_REASON="never merge a shepherd PR. Set phase=done and hand the PR back to 
 FORCE_REASON="never force-push a shepherd branch. Push follow-up commits so earlier reviews stay valid."
 DELETE_REASON="never delete a shepherd branch on the remote. It holds the PR head reviewers read."
 GATE_REASON="never change or remove the git pre-push gate or shepherd state (core.hooksPath, extensions.worktreeConfig, shepherd/ in the git dir) on a shepherd branch. Ask the user to do it."
-DEEP_REASON="this command nests shells or substitutions too deep to read, and it names a push or a merge. Run the push as a plain command."
+DEEP_REASON="this command nests shells or substitutions too deep, or expands braces too far, to read, and it may run a push or a merge. Run the push as a plain command."
 VERIFY_REASON="never skip the git pre-push gate (--no-verify, core.hooksPath, GIT_CONFIG*, GIT_DIR, --git-dir, --work-tree). Clear the tree with the review gate, then push."
 
 # Merge words anywhere in the command, not only after a `gh` word, so
@@ -172,7 +173,7 @@ is_state_path() {
 
 shopt -s nocasematch
 is_state_path "$PWD" && in_state=1 || in_state=0
-(( in_state )) || [[ "$cmd" == *push* || "$cmd" == *merge* || "$cmd" == *config* || "$cmd" == *shepherd* || "$cmd" == *_githooks* ]] || exit 0
+(( in_state )) || [[ "$cmd" == *push* || "$cmd" == *merge* || "$cmd" == *config* || "$cmd" == *shepherd* || "$cmd" == *_githooks* || "$cmd" == *'{'*'}'* ]] || exit 0
 shopt -u nocasematch
 shepherd_is_active || exit 0
 shepherd_split_command "$cmd"
@@ -207,7 +208,7 @@ for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
   is_gate_config_write "${argv[@]}" && reason=${reason:-$GATE_REASON}
 done
 (( push_word )) && [[ "$cmd" == *git_config* || "$cmd" == *git_dir* || "$cmd" == *git_common_dir* || "$cmd" == *git_work_tree* ]] && bypass=1
-(( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *push* || "$cmd" == *merge* ]] && deep=1 || deep=0
+(( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *push* || "$cmd" == *merge* || "$cmd" == *'{'* ]] && deep=1 || deep=0
 shopt -u nocasematch
 
 (( push || merge || bypass || deep )) || [[ -n "$reason" ]] || exit 0

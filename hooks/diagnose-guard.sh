@@ -133,11 +133,11 @@ git_write() {
 }
 
 # A gh command that writes to a PR, an issue, or the API. graphql queries are
-# POSTs too, so a graphql call passes only with a literal query (`query=` and a
-# `{` in one word, no `$` or backtick in the call) and no mutation, `@file`
-# value, or --input.
+# POSTs too, so a graphql call passes only when every `query=` word is literal
+# (a `{`, no `$` or backtick, no `$(...)` per marks) and no word has a
+# mutation, an `@file` value, or --input.
 gh_write() {
-  local a literal=0
+  local a k=0 query=0
   shepherd_gh_parse "$@"
   case "${SHEPHERD_GH_POS[1]:-} ${SHEPHERD_GH_POS[2]:-}" in
     "pr create" | "pr merge" | "pr edit" | "pr comment" | "pr review" | "pr close" | "pr ready" | "pr reopen" \
@@ -147,9 +147,13 @@ gh_write() {
   [[ " ${SHEPHERD_GH_POS[*]} " == *" graphql "* ]] || return 0
   for a in "$@"; do
     [[ "$a" == *mutation* || "$a" == *=@* || "$a" == --input* ]] && return 0
-    [[ "$a" == query=*'{'* && "$cmd" != *'$'* && "$cmd" != *'`'* ]] && literal=1
+    if [[ "$a" == query=* ]]; then
+      [[ "$a" == *'{'* && "$a" != *'$'* && "$a" != *'`'* && "${marks[k]:-0}" == 0 ]] || return 0
+      query=1
+    fi
+    k=$((k + 1))
   done
-  (( ! literal ))
+  (( ! query ))
 }
 
 case "$tool" in
@@ -172,10 +176,11 @@ case "$tool" in
     [[ "$cmd" =~ ^[[:space:]]*(cd|pushd)[[:space:]] ]] && leading=1 || leading=0
     dir=$start
     shepherd_split_command "$cmd" --heredoc-data
-    (( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *git* || "$cmd" == *gh* ]] \
-      && deny "this command nests shells or substitutions too deep to read. Run git and gh as plain commands."
-    for seg in ${SHEPHERD_SEGMENTS[@]+"${SHEPHERD_SEGMENTS[@]}"}; do
-      IFS="$SHEPHERD_SEP" read -ra argv <<<"$seg"
+    (( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *git* || "$cmd" == *gh* || "$cmd" == *'{'* ]] \
+      && deny "this command nests shells or substitutions too deep, or expands braces too far, to read. Run git and gh as plain commands."
+    for (( s = 0; s < ${#SHEPHERD_SEGMENTS[@]}; s++ )); do
+      IFS="$SHEPHERD_SEP" read -ra argv <<<"${SHEPHERD_SEGMENTS[s]}"
+      IFS="$SHEPHERD_SEP" read -ra marks <<<"${SHEPHERD_SEGMENT_SUBST[s]}"
       case "${argv[0]##*/}" in
         cd | pushd) dir=$(cd_target "${argv[@]:1}") ;;
         popd) dir="" ;;
