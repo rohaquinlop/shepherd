@@ -10,8 +10,8 @@
 # An unquoted brace word (`{a,b}`, `{x..y}`) is expanded as bash does; one that
 # would make more than 1024 words, or has a step, stays literal and sets
 # SHEPHERD_SPLIT_TRUNCATED. SHEPHERD_SEGMENT_SUBST has, per segment, one 0/1
-# per word joined by $SHEPHERD_SEP: 1 when the word held a `$(...)` or
-# backticks, whose body the word loses.
+# per word joined by $SHEPHERD_SEP: 1 when the word held a `$(...)`, backticks,
+# or `$'...'` / `$"..."`, so its text is not what bash passes.
 # It reads command shapes, not full shell syntax: heredoc bodies and arithmetic
 # read as commands, which errs toward a deny.
 #
@@ -59,7 +59,7 @@ _shepherd_split() {
       i=$((i + 2)); continue
     fi
     if [[ "$c" == '$' && "${s:i+1:1}" == [\'\"] ]]; then
-      i=$((i + 1)); continue
+      i=$((i + 1)); wsub=1; continue
     fi
     _shepherd_substitution && { wsub=1; continue; }
     if [[ "$q" == '"' ]]; then

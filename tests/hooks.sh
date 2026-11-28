@@ -147,7 +147,7 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   "git -C $scr/wt clean -fdx" "git -C $scr/repo push origin main" 'gh api graphql -F query=@m.graphql' 'gh api graphql -f query="${Q}{ x }"' 'gh api graphql -f query="query Q { $(cat m) }"' 'gh api graphql -f query="query Q { `cat m` }"' \
   'gh api graphql -f query="$(cat m.graphql)"' "$deep" 'gh pr close 1' 'gh issue create -t x' 'git branch -f x' \
   'git {commit,} -m x' 'gh issue {comment,} 1 -b x' 'git log {1..9999}' \
-  'gh api graphql -f query="{ viewer }" -f query="$M"' 'gh api graphql -f query="{ viewer }" -F query="$M"'; do
+  'gh api graphql -f query="{ viewer }" -f query="$M"' 'gh api graphql -f query="{ viewer }" -F query="$M"' "gh api graphql -f query=\$'\\x6dutation { viewer { login } }'"; do
   ok "guard denies: ${c//$'\n'/\\n}" 'gdenied "$c"'
 done
 for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit -m x" \
