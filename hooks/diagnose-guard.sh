@@ -170,11 +170,10 @@ case "$tool" in
   Bash)
     cmd=$(jq -r '.tool_input.command // empty' <<<"$input")
     scratch_p=$(physical "$scratch")
-    git_env=0
-    [[ "$cmd" == *GIT_DIR* || "$cmd" == *GIT_WORK_TREE* || "$cmd" == *GIT_COMMON_DIR* || "$cmd" == *GIT_CONFIG* ]] && git_env=1
     [[ "$cmd" =~ ^[[:space:]]*(cd|pushd)[[:space:]] ]] && leading=1 || leading=0
     dir=$start
     shepherd_split_command "$cmd" --heredoc-data
+    shepherd_names_git_env "$cmd" && git_env=1 || git_env=0
     (( SHEPHERD_SPLIT_TRUNCATED )) && [[ "$cmd" == *git* || "$cmd" == *gh* || "$cmd" == *'{'* ]] \
       && deny "this command nests shells or substitutions too deep, or expands braces too far, to read. Run git and gh as plain commands."
     for (( s = 0; s < ${#SHEPHERD_SEGMENTS[@]}; s++ )); do
