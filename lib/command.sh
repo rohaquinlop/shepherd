@@ -7,6 +7,11 @@
 # a newline, `;`, `&`, `|`, `(`, or `)`; the body of `$(...)` or backticks is a
 # segment of its own. Leading `command`, `env`, `VAR=val`, `sudo`, and `time`
 # are dropped, and the script of `bash|sh|zsh|dash|ksh -c` is split in turn.
+# An unquoted brace word (`{a,b}`, `{x..y}`) is expanded as bash does; one that
+# would make more than 1024 words, or has a step, stays literal and sets
+# SHEPHERD_SPLIT_TRUNCATED. SHEPHERD_SEGMENT_SUBST has, per segment, one 0/1
+# per word joined by $SHEPHERD_SEP: 1 when the word held a `$(...)` or
+# backticks, whose body the word loses.
 # It reads command shapes, not full shell syntax: heredoc bodies and arithmetic
 # read as commands, which errs toward a deny.
 #
@@ -20,6 +25,7 @@ SHEPHERD_SPLIT_DEPTH=4
 
 shepherd_split_command() {
   SHEPHERD_SEGMENTS=()
+  SHEPHERD_SEGMENT_SUBST=()
   SHEPHERD_SPLIT_TRUNCATED=0
   SHEPHERD_SPLIT_HEREDOC=""
   [[ "${2:-}" == --heredoc-data ]] && SHEPHERD_SPLIT_HEREDOC=data
@@ -29,7 +35,8 @@ shepherd_split_command() {
 
 _shepherd_split() {
   local s="$1" depth="$2" n=${#1} i=0 c q="" word="" inword=0 line_seg=${#SHEPHERD_SEGMENTS[@]}
-  local -a words=() heredocs=()
+  local upos="" uopen=0 udollar=-1 brace=0 wsub=0
+  local -a words=() marks=() heredocs=()
   if (( depth > SHEPHERD_SPLIT_DEPTH )); then
     SHEPHERD_SPLIT_TRUNCATED=1
     return 0
@@ -54,7 +61,7 @@ _shepherd_split() {
     if [[ "$c" == '$' && "${s:i+1:1}" == [\'\"] ]]; then
       i=$((i + 1)); continue
     fi
-    _shepherd_substitution && continue
+    _shepherd_substitution && { wsub=1; continue; }
     if [[ "$q" == '"' ]]; then
       if [[ "$c" == '"' ]]; then q=""; else word+=$c; fi
       i=$((i + 1)); continue
@@ -93,6 +100,14 @@ _shepherd_split() {
           while (( i + 1 < n )) && [[ "${s:i+1:1}" != $'\n' ]]; do i=$((i + 1)); done
         fi ;;
       *)
+        if [[ "$c" == [A-Za-z0-9_,.-] ]] || [[ "$c" == "{" && "$udollar" != "${#word}" ]]; then
+          upos+=" ${#word} "
+          [[ "$c" == '{' ]] && uopen=1
+        elif [[ "$c" == '}' ]]; then
+          upos+=" ${#word} "
+          (( uopen )) && brace=1
+        fi
+        [[ "$c" == "$" ]] && udollar=$((${#word} + 1))
         word+=$c; inword=1 ;;
     esac
     i=$((i + 1))
@@ -207,19 +222,71 @@ _shepherd_substitutions() {
 }
 
 _shepherd_end_word() {
-  (( inword )) && words+=("$word")
-  word=""; inword=0
+  if (( inword )); then
+    if (( brace )); then
+      _shepherd_brace
+    else
+      words+=("$word"); marks+=("$wsub")
+    fi
+  fi
+  word="" inword=0 upos="" uopen=0 udollar=-1 brace=0 wsub=0
+}
+
+# Add the words bash makes of the brace word in `word`. Only the unquoted chars
+# in upos stay unescaped, so eval does brace expansion and nothing else.
+_shepherd_brace() {
+  local e="" k ch len a b commas=0 total=1 rest
+  local re='\{(-?[0-9]+|[A-Za-z])\.\.(-?[0-9]+|[A-Za-z])(\.\.-?[0-9]+)?\}'
+  local -a exp=()
+  for (( k = 0; k < ${#word}; k++ )); do
+    ch=${word:k:1}
+    if [[ "$upos" == *" $k "* ]]; then
+      e+=$ch
+      [[ "$ch" == , ]] && commas=$((commas + 1))
+    elif [[ "$ch" == $'\n' ]]; then
+      e+="'"$'\n'"'"
+    else
+      e+="\\$ch"
+    fi
+  done
+  (( commas > 10 )) && total=0 || total=$((1 << commas))
+  rest=$e
+  while (( total )) && [[ "$rest" =~ $re ]]; do
+    a=${BASH_REMATCH[1]} b=${BASH_REMATCH[2]}
+    rest=${rest#*"${BASH_REMATCH[0]}"}
+    if [[ -n "${BASH_REMATCH[3]}" || ${#a} -gt 5 || ${#b} -gt 5 ]]; then
+      total=0
+    elif [[ "$a" == *[0-9] && "$b" == *[0-9] ]]; then
+      len=$((10#${a#-} * ${a%%[0-9]*}1 - 10#${b#-} * ${b%%[0-9]*}1))
+      total=$((total * (${len#-} + 1)))
+    elif [[ "$a" == [A-Za-z] && "$b" == [A-Za-z] ]]; then
+      a=$(printf %d "'$a") b=$(printf %d "'$b")
+      len=$((a - b))
+      total=$((total * (${len#-} + 1)))
+    fi
+    (( total > 1024 )) && total=0
+  done
+  if (( total )) && eval "exp=( $e )" 2>/dev/null; then
+    for ch in ${exp[@]+"${exp[@]}"}; do
+      words+=("$ch"); marks+=("$wsub")
+    done
+  else
+    SHEPHERD_SPLIT_TRUNCATED=1
+    words+=("$word"); marks+=("$wsub")
+  fi
 }
 
 _shepherd_end_segment() {
   _shepherd_end_word
-  (( ${#words[@]} )) && _shepherd_emit "$depth" "${words[@]}"
-  words=()
+  (( ${#words[@]} )) && _shepherd_emit "$depth" "${marks[*]}" "${words[@]}"
+  words=() marks=()
 }
 
 _shepherd_emit() {
   local depth="$1" k opt
-  shift
+  local -a m
+  read -ra m <<<"$2"
+  shift 2
   local -a w=("$@")
   while (( ${#w[@]} )); do
     if [[ "${w[0]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
@@ -304,8 +371,10 @@ _shepherd_emit() {
       fi ;;
   esac
   w=("${w[@]//$'\n'/ }")
+  m=("${m[@]:${#m[@]}-${#w[@]}}")
   local IFS="$SHEPHERD_SEP"
   SHEPHERD_SEGMENTS+=("${w[*]}")
+  SHEPHERD_SEGMENT_SUBST+=("${m[*]}")
 }
 
 # shepherd_git_parse WORD...: when the words run git, sets SHEPHERD_GIT_SUB to
