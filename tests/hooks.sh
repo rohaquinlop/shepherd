@@ -75,7 +75,9 @@ for c in 'git push --force origin feat/x' 'git push -f origin feat/x' 'git push 
   'rm -rf $(git rev-parse --git-dir)/x/../shepherd' 'git {push,} --force origin feat/x' 'gh pr {merge,} 1' \
   'gh pr mer{g,}e 1' 'rm -rf .git/worktrees/wt/sh{e,}pherd' '$(x)sudo git {push,} --force origin feat/x' \
   '$(x)env git push -f origin feat/x' 'git push {1..9999} origin feat/x' 'git pu{s,}h {1..9999} origin feat/x' \
-  'git pu{s,}h {a,b,c,d,e,f}{a,b,c,d,e,f}{a,b,c,d,e,f}{a,b,c,d,e,f}'; do
+  'git pu{s,}h {a,b,c,d,e,f}{a,b,c,d,e,f}{a,b,c,d,e,f}{a,b,c,d,e,f}' \
+  'export GIT_{DIR,}=../r/.git; git push origin feat/x' 'env GIT_{DIR,}=../r/.git git push origin feat/x' \
+  'export GIT_"DIR"=../r/.git; git push origin feat/x' 'declare -x GIT_{CONFIG_COUNT,}=1; git push origin feat/x'; do
   ok "hook denies: ${c//$'\n'/\\n}" 'denied "$c"'
 done
 for c in 'grep -n hooksPath hooks/pre-push.sh' 'grep GIT_CONFIG .husky/pre-push' 'git commit -m "push --no-verify"' \
@@ -155,7 +157,9 @@ for c in $'echo ok\ngit commit -m x' 'git clean -fdx' 'git tag v1' 'gh issue com
   'gh api graphql -R $R -f query="{ viewer { login } }"' 'gh api graphql -f query="{ viewer }" -f q=x $X' \
   'sh -c "gh api graphql -f query=\"{ viewer }\"$(cat m)"' 'eval "gh api graphql -f query=\"{ viewer }\"$(cat m)"' \
   'gh api graphql -f query="{ viewer }" $(echo -F query=mutation)' 'gh api graphql -f query="{ viewer }" `echo -F query=mutation`' \
-  'gh api graphql $(echo -F query=mutation) -f query="{ viewer }"' 'git log {a,b,c,d,e,f}{a,b,c,d,e,f}{a,b,c,d,e,f}{a,b,c,d,e,f}'; do
+  'gh api graphql $(echo -F query=mutation) -f query="{ viewer }"' 'git log {a,b,c,d,e,f}{a,b,c,d,e,f}{a,b,c,d,e,f}{a,b,c,d,e,f}' \
+  "export GIT_{DIR,}=$T/r/.git; git -C $scr/repo commit -m x" "env GIT_{DIR,}=$T/r/.git git -C $scr/repo commit -m x" \
+  "export GIT_\"DIR\"=$T/r/.git; git -C $scr/repo commit -m x"; do
   ok "guard denies: ${c//$'\n'/\\n}" 'gdenied "$c"'
 done
 for c in "git -C $scr/repo commit -m x" "cd $scr/repo && git add . && git commit -m x" \
